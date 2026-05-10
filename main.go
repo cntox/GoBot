@@ -23,21 +23,15 @@ func main() {
 		log.Fatal(err)
 	}
 
-	client.Conn() // Establishes connection
+	client.Conn()
 
 	// Login using your Bot Token
 	client.LoginBot("8793661673:AAEn5NK7sJ-dV328XBEVgeWhoDWbAICLzUI")
 
-	// Command Router
 	client.On(telegram.OnMessage, func(m *telegram.NewMessage) error {
-		var text string
-		if m.Text != "" {
-			text = m.Text
-		} else if m.Message != nil {
-			text = m.Message.Message
-		}
+		// m.Text is a function, so we call it using ()
+		text := m.Text()
 
-		// Routing logic
 		switch {
 		case strings.HasPrefix(text, "/ping"):
 			return handlePing(m)
@@ -50,7 +44,6 @@ func main() {
 		return nil
 	}, telegram.IsCommand, telegram.IsGroup)
 
-	// Block main goroutine until client is closed
 	client.Idle()
 }
 
@@ -58,8 +51,7 @@ func main() {
 
 func handlePing(m *telegram.NewMessage) error {
 	start := time.Now()
-	// Using HTML parse mode for consistent look
-	_, err := m.Reply("🏓 <i>Pinging...</i>", &telegram.SendMessageOptions{ParseMode: "html"})
+	_, err := m.Reply("🏓 <i>Pinging...</i>", &telegram.ReplyOptions{ParseMode: "html"})
 	if err != nil {
 		return err
 	}
@@ -68,23 +60,23 @@ func handlePing(m *telegram.NewMessage) error {
 	res := fmt.Sprintf("🏓 <b>Pong!</b>\n\n<b>Latency:</b> <code>%v</code>\n<b>Server Time:</b> <code>%s</code>", 
 		elapsed, time.Now().Format("15:04:05 MST"))
 
-	_, err = m.Reply(res, &telegram.SendMessageOptions{ParseMode: "html"})
+	_, err = m.Reply(res, &telegram.ReplyOptions{ParseMode: "html"})
 	return err
 }
 
 func handleSpeedtest(m *telegram.NewMessage) error {
-	_, _ = m.Reply("🚀 <i>Starting speedtest... Please wait.</i>", &telegram.SendMessageOptions{ParseMode: "html"})
+	_, _ = m.Reply("🚀 <i>Starting speedtest... Please wait.</i>", &telegram.ReplyOptions{ParseMode: "html"})
 
 	st := speedtest.New()
 	serverList, err := st.FetchServers()
 	if err != nil {
-		_, err = m.Reply("❌ <b>Error fetching servers.</b>", &telegram.SendMessageOptions{ParseMode: "html"})
+		_, err = m.Reply("❌ <b>Error fetching servers.</b>", &telegram.ReplyOptions{ParseMode: "html"})
 		return err
 	}
 
 	targets, err := serverList.FindServer([]int{})
 	if err != nil || len(targets) == 0 {
-		_, err = m.Reply("❌ <b>No suitable server found.</b>", &telegram.SendMessageOptions{ParseMode: "html"})
+		_, err = m.Reply("❌ <b>No suitable server found.</b>", &telegram.ReplyOptions{ParseMode: "html"})
 		return err
 	}
 
@@ -96,7 +88,7 @@ func handleSpeedtest(m *telegram.NewMessage) error {
 	res := fmt.Sprintf("🚀 <b>Speedtest Results</b>\n\n<b>Server:</b> <code>%s</code>\n<b>Ping:</b> <code>%v</code>\n<b>Download:</b> <code>%.2f Mbps</code>\n<b>Upload:</b> <code>%.2f Mbps</code>",
 		s.Host, s.Latency, s.DLSpeed, s.ULSpeed)
 
-	_, err = m.Reply(res, &telegram.SendMessageOptions{ParseMode: "html"})
+	_, err = m.Reply(res, &telegram.ReplyOptions{ParseMode: "html"})
 	return err
 }
 
@@ -128,6 +120,6 @@ func handleStats(m *telegram.NewMessage) error {
 		float64(d.Total)/gb, float64(d.Used)/gb, d.UsedPercent, float64(d.Free)/gb,
 	)
 
-	_, err := m.Reply(res, &telegram.SendMessageOptions{ParseMode: "html"})
+	_, err := m.Reply(res, &telegram.ReplyOptions{ParseMode: "html"})
 	return err
 }
