@@ -37,9 +37,6 @@ func main() {
 	client.Conn()
 	client.LoginBot("8793661673:AAEn5NK7sJ-dV328XBEVgeWhoDWbAICLzUI")
 
-	// HTML parse mode is set per message, not globally via ParseMode() in gogram
-	// We'll use ParseMode:"html" in each send/edit call.
-
 	client.On(telegram.OnMessage, func(m *telegram.NewMessage) error {
 		text := m.Text()
 
@@ -174,18 +171,28 @@ func handleCallback(cb *telegram.CallbackQuery, client *telegram.Client) error {
 		messageID := msg.ID
 		for i := 3; i > 0; i-- {
 			text := fmt.Sprintf("⏳ <b>Poll starting in %d...</b>", i)
-			_, _ = client.EditMessage(chatID, messageID, text, &telegram.EditMessageOpts{ParseMode: "html"})
+			// Use telegram.EditMessage with the new text, ensuring HTML parsing is set
+			_, _ = client.EditMessage(chatID, messageID, &telegram.EditMessage{
+				Message:   text,
+				ParseMode: "html",
+			})
 			time.Sleep(1 * time.Second)
 		}
 
-		_, _ = client.EditMessage(chatID, messageID, "<b>🎉 Creating poll...</b>", &telegram.EditMessageOpts{ParseMode: "html"})
+		_, _ = client.EditMessage(chatID, messageID, &telegram.EditMessage{
+			Message:   "<b>🎉 Creating poll...</b>",
+			ParseMode: "html",
+		})
 
 		// Send the poll
 		_, err := client.SendPoll(chatID, session.Question, session.Options, nil)
 		if err != nil {
 			_, _ = client.SendMessage(chatID, fmt.Sprintf("❌ Failed to create poll: %v", err), nil)
 		} else {
-			_, _ = client.EditMessage(chatID, messageID, "✅ <b>Poll has been created!</b>", &telegram.EditMessageOpts{ParseMode: "html"})
+			_, _ = client.EditMessage(chatID, messageID, &telegram.EditMessage{
+				Message:   "✅ <b>Poll has been created!</b>",
+				ParseMode: "html",
+			})
 		}
 
 		sessions.Delete(key)
