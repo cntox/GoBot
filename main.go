@@ -1,6 +1,10 @@
 package main
 
-import "github.com/amarnathcjd/gogram/telegram"
+import (
+    "log"
+    "github.com/amarnathcjd/gogram/telegram"
+)
+
 
 func main() {
     client, err := telegram.NewClient(telegram.ClientConfig{
