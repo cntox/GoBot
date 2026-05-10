@@ -27,7 +27,7 @@ func main() {
 	client.LoginBot("8793661673:AAEn5NK7sJ-dV328XBEVgeWhoDWbAICLzUI")
 
 	// Set parse mode globally for the client
-	client.ParseMode("html")
+	// client.ParseMode("html")
 
 	client.On(telegram.OnMessage, func(m *telegram.NewMessage) error {
 		text := m.Text()
