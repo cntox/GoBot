@@ -51,7 +51,7 @@ func main() {
 
 func handlePing(m *telegram.NewMessage) error {
 	start := time.Now()
-	_, err := m.Reply("🏓 <i>Pinging...</i>", &telegram.ReplyOptions{ParseMode: "html"})
+	_, err := m.Reply("🏓 <i>Pinging...</i>",{ParseMode: "html"})
 	if err != nil {
 		return err
 	}
@@ -60,7 +60,7 @@ func handlePing(m *telegram.NewMessage) error {
 	res := fmt.Sprintf("🏓 <b>Pong!</b>\n\n<b>Latency:</b> <code>%v</code>\n<b>Server Time:</b> <code>%s</code>", 
 		elapsed, time.Now().Format("15:04:05 MST"))
 
-	_, err = m.Reply(res, &telegram.ReplyOptions{ParseMode: "html"})
+	_, err = m.Reply(res, {ParseMode: "html"})
 	return err
 }
 
@@ -88,7 +88,7 @@ func handleSpeedtest(m *telegram.NewMessage) error {
 	res := fmt.Sprintf("🚀 <b>Speedtest Results</b>\n\n<b>Server:</b> <code>%s</code>\n<b>Ping:</b> <code>%v</code>\n<b>Download:</b> <code>%.2f Mbps</code>\n<b>Upload:</b> <code>%.2f Mbps</code>",
 		s.Host, s.Latency, s.DLSpeed, s.ULSpeed)
 
-	_, err = m.Reply(res, &telegram.ReplyOptions{ParseMode: "html"})
+	_, err = m.Reply(res, {ParseMode: "html"})
 	return err
 }
 
