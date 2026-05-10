@@ -26,7 +26,7 @@ func main() {
     client.On(telegram.OnMessage, func(m *telegram.NewMessage) error {
     _, err := m.Reply("Hello from Gogram!")
     return err
-}, telegram.IsCommand["/start"], telegram.IsGroup)
+}, telegram.IsCommand, telegram.IsGroup)
  // waits for private messages only
 
     client.Idle() // block main goroutine until client is closed
