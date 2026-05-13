@@ -190,6 +190,7 @@ async def quiz_handler(event):
                 id=poll.id,
                 question=question,
                 answers=answers,
+                hash=0,
                 public_voters=False,
                 multiple_choice=False,
                 quiz=True,
