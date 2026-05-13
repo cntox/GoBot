@@ -9,6 +9,7 @@ import random
 import asyncio
 import logging
 import sqlite3
+import contextlib
 from datetime import datetime, timedelta
 import os
 
@@ -44,263 +45,260 @@ ADMIN_IDS = [6644859358, 8451305181, 7183060880]
 # Store active quiz session: chat_id -> quiz_id
 active_sessions = {}
 
-# ---------- Database functions (unchanged, but with improved error logging) ----------
-def init_database():
+# ---------- Database helpers ----------
+@contextlib.contextmanager
+def get_db():
+    """Open a database connection with WAL-mode busy timeout, close when done."""
     conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
-    users_table_exists = cursor.fetchone() is not None
-    if not users_table_exists:
+    conn.execute("PRAGMA busy_timeout=5000;")
+    try:
+        yield conn
+    finally:
+        conn.close()
+
+def init_database():
+    with get_db() as conn:
+        # Enable WAL mode – persists for the file
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("PRAGMA busy_timeout=10000;")  # extra safety for this init
+
+        cursor = conn.cursor()
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
+        users_table_exists = cursor.fetchone() is not None
+        if not users_table_exists:
+            cursor.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                user_id INTEGER PRIMARY KEY,
+                username TEXT,
+                first_name TEXT,
+                last_name TEXT,
+                joined_all_channels BOOLEAN DEFAULT 0,
+                last_check TIMESTAMP,
+                last_warning TIMESTAMP,
+                welcome_sent BOOLEAN DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )''')
+        else:
+            cursor.execute("PRAGMA table_info(users)")
+            columns = [column[1] for column in cursor.fetchall()]
+            if 'username' not in columns:
+                cursor.execute("ALTER TABLE users ADD COLUMN username TEXT")
+            if 'first_name' not in columns:
+                cursor.execute("ALTER TABLE users ADD COLUMN first_name TEXT")
+            if 'last_name' not in columns:
+                cursor.execute("ALTER TABLE users ADD COLUMN last_name TEXT")
+            if 'last_warning' not in columns:
+                cursor.execute("ALTER TABLE users ADD COLUMN last_warning TIMESTAMP")
+            if 'welcome_sent' not in columns:
+                cursor.execute("ALTER TABLE users ADD COLUMN welcome_sent BOOLEAN DEFAULT 0")
         cursor.execute('''
-        CREATE TABLE IF NOT EXISTS users (
-            user_id INTEGER PRIMARY KEY,
-            username TEXT,
-            first_name TEXT,
-            last_name TEXT,
-            joined_all_channels BOOLEAN DEFAULT 0,
-            last_check TIMESTAMP,
-            last_warning TIMESTAMP,
-            welcome_sent BOOLEAN DEFAULT 0,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        CREATE TABLE IF NOT EXISTS channel_joins (
+            user_id INTEGER,
+            channel_id TEXT,
+            joined BOOLEAN DEFAULT 0,
+            last_checked TIMESTAMP,
+            PRIMARY KEY (user_id, channel_id)
         )''')
-    else:
-        cursor.execute("PRAGMA table_info(users)")
-        columns = [column[1] for column in cursor.fetchall()]
-        if 'username' not in columns:
-            cursor.execute("ALTER TABLE users ADD COLUMN username TEXT")
-        if 'first_name' not in columns:
-            cursor.execute("ALTER TABLE users ADD COLUMN first_name TEXT")
-        if 'last_name' not in columns:
-            cursor.execute("ALTER TABLE users ADD COLUMN last_name TEXT")
-        if 'last_warning' not in columns:
-            cursor.execute("ALTER TABLE users ADD COLUMN last_warning TIMESTAMP")
-        if 'welcome_sent' not in columns:
-            cursor.execute("ALTER TABLE users ADD COLUMN welcome_sent BOOLEAN DEFAULT 0")
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS channel_joins (
-        user_id INTEGER,
-        channel_id TEXT,
-        joined BOOLEAN DEFAULT 0,
-        last_checked TIMESTAMP,
-        PRIMARY KEY (user_id, channel_id)
-    )''')
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS user_actions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER,
-        action TEXT,
-        timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )''')
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS bot_stats (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        total_users INTEGER DEFAULT 0,
-        active_users INTEGER DEFAULT 0,
-        total_polls INTEGER DEFAULT 0,
-        last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )''')
-    conn.commit()
-    conn.close()
-    logging.info("Database initialized")
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS user_actions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            action TEXT,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )''')
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS bot_stats (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            total_users INTEGER DEFAULT 0,
+            active_users INTEGER DEFAULT 0,
+            total_polls INTEGER DEFAULT 0,
+            last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )''')
+        conn.commit()
+        logging.info("Database initialized")
 
 def is_admin(user_id):
     return user_id in ADMIN_IDS
 
 def update_user_channels(user_id, channels_status, user_info=None):
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    try:
-        cursor.execute('SELECT joined_all_channels FROM users WHERE user_id = ?', (user_id,))
-        previous_result = cursor.fetchone()
-        previous_joined_all = previous_result[0] if previous_result else False
-        if user_info:
-            cursor.execute('SELECT COUNT(*) FROM users WHERE user_id = ?', (user_id,))
-            user_exists = cursor.fetchone()[0] > 0
-            if user_exists:
-                cursor.execute('''
-                UPDATE users SET 
-                    username = COALESCE(?, username),
-                    first_name = COALESCE(?, first_name),
-                    last_name = COALESCE(?, last_name),
-                    last_check = ?
-                WHERE user_id = ?
-                ''', (user_info.get('username'), user_info.get('first_name'), 
-                      user_info.get('last_name'), datetime.now(), user_id))
+    with get_db() as conn:
+        cursor = conn.cursor()
+        try:
+            cursor.execute('SELECT joined_all_channels FROM users WHERE user_id = ?', (user_id,))
+            previous_result = cursor.fetchone()
+            previous_joined_all = previous_result[0] if previous_result else False
+            if user_info:
+                cursor.execute('SELECT COUNT(*) FROM users WHERE user_id = ?', (user_id,))
+                user_exists = cursor.fetchone()[0] > 0
+                if user_exists:
+                    cursor.execute('''
+                    UPDATE users SET 
+                        username = COALESCE(?, username),
+                        first_name = COALESCE(?, first_name),
+                        last_name = COALESCE(?, last_name),
+                        last_check = ?
+                    WHERE user_id = ?
+                    ''', (user_info.get('username'), user_info.get('first_name'), 
+                          user_info.get('last_name'), datetime.now(), user_id))
+                else:
+                    cursor.execute('''
+                    INSERT INTO users 
+                    (user_id, username, first_name, last_name, last_check) 
+                    VALUES (?, ?, ?, ?, ?)
+                    ''', (user_id, user_info.get('username'), user_info.get('first_name'), 
+                          user_info.get('last_name'), datetime.now()))
             else:
+                cursor.execute('INSERT OR IGNORE INTO users (user_id, last_check) VALUES (?, ?)', (user_id, datetime.now()))
+                cursor.execute('UPDATE users SET last_check = ? WHERE user_id = ?', (datetime.now(), user_id))
+            for channel_id, joined in channels_status.items():
                 cursor.execute('''
-                INSERT INTO users 
-                (user_id, username, first_name, last_name, last_check) 
-                VALUES (?, ?, ?, ?, ?)
-                ''', (user_id, user_info.get('username'), user_info.get('first_name'), 
-                      user_info.get('last_name'), datetime.now()))
-        else:
-            cursor.execute('INSERT OR IGNORE INTO users (user_id, last_check) VALUES (?, ?)', (user_id, datetime.now()))
-            cursor.execute('UPDATE users SET last_check = ? WHERE user_id = ?', (datetime.now(), user_id))
-        for channel_id, joined in channels_status.items():
+                INSERT OR REPLACE INTO channel_joins (user_id, channel_id, joined, last_checked)
+                VALUES (?, ?, ?, ?)
+                ''', (user_id, channel_id, 1 if joined else 0, datetime.now()))
+            cursor.execute('SELECT COUNT(*) FROM channel_joins WHERE user_id = ? AND joined = 1', (user_id,))
+            joined_count = cursor.fetchone()[0]
+            has_joined_all = joined_count >= len(REQUIRED_CHANNELS)
             cursor.execute('''
-            INSERT OR REPLACE INTO channel_joins (user_id, channel_id, joined, last_checked)
-            VALUES (?, ?, ?, ?)
-            ''', (user_id, channel_id, 1 if joined else 0, datetime.now()))
-        cursor.execute('SELECT COUNT(*) FROM channel_joins WHERE user_id = ? AND joined = 1', (user_id,))
-        joined_count = cursor.fetchone()[0]
-        has_joined_all = joined_count >= len(REQUIRED_CHANNELS)
-        cursor.execute('''
-        UPDATE users SET joined_all_channels = ?, last_check = ? WHERE user_id = ?
-        ''', (1 if has_joined_all else 0, datetime.now(), user_id))
-        cursor.execute('INSERT INTO user_actions (user_id, action) VALUES (?, ?)',
-                       (user_id, f"channel_check_{'all_joined' if has_joined_all else 'missing_channels'}"))
-        update_bot_stats()
-        conn.commit()
-        status_changed = previous_joined_all != has_joined_all
-        return has_joined_all, status_changed
-    except Exception as e:
-        logging.exception(f"Error updating user channels for {user_id}")
-        conn.rollback()
-        return False, False
-    finally:
-        conn.close()
+            UPDATE users SET joined_all_channels = ?, last_check = ? WHERE user_id = ?
+            ''', (1 if has_joined_all else 0, datetime.now(), user_id))
+            cursor.execute('INSERT INTO user_actions (user_id, action) VALUES (?, ?)',
+                           (user_id, f"channel_check_{'all_joined' if has_joined_all else 'missing_channels'}"))
+            update_bot_stats()
+            conn.commit()
+            status_changed = previous_joined_all != has_joined_all
+            return has_joined_all, status_changed
+        except Exception as e:
+            logging.exception(f"Error updating user channels for {user_id}")
+            conn.rollback()
+            return False, False
 
 def update_bot_stats():
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    try:
-        cursor.execute('SELECT COUNT(*) FROM users')
-        total_users = cursor.fetchone()[0]
-        seven_days_ago = datetime.now() - timedelta(days=7)
-        cursor.execute('SELECT COUNT(*) FROM users WHERE last_check >= ?', (seven_days_ago,))
-        active_users = cursor.fetchone()[0]
-        cursor.execute("SELECT COUNT(*) FROM user_actions WHERE action LIKE '%channel_check_all_joined%'")
-        total_polls = cursor.fetchone()[0]
-        cursor.execute('''
-        INSERT OR REPLACE INTO bot_stats (id, total_users, active_users, total_polls, last_updated)
-        VALUES (1, ?, ?, ?, ?)
-        ''', (total_users, active_users, total_polls, datetime.now()))
-        conn.commit()
-    except Exception as e:
-        logging.exception("Error updating bot stats")
-        conn.rollback()
-    finally:
-        conn.close()
+    with get_db() as conn:
+        cursor = conn.cursor()
+        try:
+            cursor.execute('SELECT COUNT(*) FROM users')
+            total_users = cursor.fetchone()[0]
+            seven_days_ago = datetime.now() - timedelta(days=7)
+            cursor.execute('SELECT COUNT(*) FROM users WHERE last_check >= ?', (seven_days_ago,))
+            active_users = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*) FROM user_actions WHERE action LIKE '%channel_check_all_joined%'")
+            total_polls = cursor.fetchone()[0]
+            cursor.execute('''
+            INSERT OR REPLACE INTO bot_stats (id, total_users, active_users, total_polls, last_updated)
+            VALUES (1, ?, ?, ?, ?)
+            ''', (total_users, active_users, total_polls, datetime.now()))
+            conn.commit()
+        except Exception as e:
+            logging.exception("Error updating bot stats")
+            conn.rollback()
 
 def get_bot_stats():
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    try:
-        cursor.execute('SELECT total_users, active_users, total_polls, last_updated FROM bot_stats WHERE id = 1')
-        stats_result = cursor.fetchone()
-        if stats_result:
-            total_users, active_users, total_polls, last_updated = stats_result
-        else:
-            total_users = active_users = total_polls = 0
-            last_updated = datetime.now()
-        cursor.execute('SELECT COUNT(*) FROM users WHERE joined_all_channels = 1')
-        users_with_access = cursor.fetchone()[0]
-        cursor.execute('SELECT COUNT(*) FROM users WHERE welcome_sent = 1')
-        users_welcomed = cursor.fetchone()[0]
-        one_day_ago = datetime.now() - timedelta(days=1)
-        cursor.execute('SELECT COUNT(*) FROM users WHERE created_at >= ?', (one_day_ago,))
-        new_users_24h = cursor.fetchone()[0]
-        channel_stats = {}
-        for channel in REQUIRED_CHANNELS:
-            cursor.execute('SELECT COUNT(*) FROM channel_joins WHERE channel_id = ? AND joined = 1', (channel,))
-            joined_count = cursor.fetchone()[0]
-            channel_stats[channel] = joined_count
-        conn.close()
-        return {
-            'total_users': total_users,
-            'active_users': active_users,
-            'total_polls': total_polls,
-            'users_with_access': users_with_access,
-            'users_welcomed': users_welcomed,
-            'new_users_24h': new_users_24h,
-            'channel_stats': channel_stats,
-            'last_updated': last_updated
-        }
-    except Exception as e:
-        logging.exception("Error getting bot stats")
-        conn.close()
-        return None
+    with get_db() as conn:
+        cursor = conn.cursor()
+        try:
+            cursor.execute('SELECT total_users, active_users, total_polls, last_updated FROM bot_stats WHERE id = 1')
+            stats_result = cursor.fetchone()
+            if stats_result:
+                total_users, active_users, total_polls, last_updated = stats_result
+            else:
+                total_users = active_users = total_polls = 0
+                last_updated = datetime.now()
+            cursor.execute('SELECT COUNT(*) FROM users WHERE joined_all_channels = 1')
+            users_with_access = cursor.fetchone()[0]
+            cursor.execute('SELECT COUNT(*) FROM users WHERE welcome_sent = 1')
+            users_welcomed = cursor.fetchone()[0]
+            one_day_ago = datetime.now() - timedelta(days=1)
+            cursor.execute('SELECT COUNT(*) FROM users WHERE created_at >= ?', (one_day_ago,))
+            new_users_24h = cursor.fetchone()[0]
+            channel_stats = {}
+            for channel in REQUIRED_CHANNELS:
+                cursor.execute('SELECT COUNT(*) FROM channel_joins WHERE channel_id = ? AND joined = 1', (channel,))
+                joined_count = cursor.fetchone()[0]
+                channel_stats[channel] = joined_count
+            return {
+                'total_users': total_users,
+                'active_users': active_users,
+                'total_polls': total_polls,
+                'users_with_access': users_with_access,
+                'users_welcomed': users_welcomed,
+                'new_users_24h': new_users_24h,
+                'channel_stats': channel_stats,
+                'last_updated': last_updated
+            }
+        except Exception as e:
+            logging.exception("Error getting bot stats")
+            return None
 
 def get_user_status(user_id):
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    try:
-        cursor.execute('''
-        SELECT u.joined_all_channels, u.welcome_sent, c.channel_id, c.joined
-        FROM users u
-        LEFT JOIN channel_joins c ON u.user_id = c.user_id
-        WHERE u.user_id = ?
-        ''', (user_id,))
-        results = cursor.fetchall()
-        if not results:
+    with get_db() as conn:
+        cursor = conn.cursor()
+        try:
+            cursor.execute('''
+            SELECT u.joined_all_channels, u.welcome_sent, c.channel_id, c.joined
+            FROM users u
+            LEFT JOIN channel_joins c ON u.user_id = c.user_id
+            WHERE u.user_id = ?
+            ''', (user_id,))
+            results = cursor.fetchall()
+            if not results:
+                return False, False, {}
+            joined_all = bool(results[0][0])
+            welcome_sent = bool(results[0][1])
+            channels_status = {}
+            for result in results:
+                if result[2]:
+                    channels_status[result[2]] = bool(result[3])
+            return joined_all, welcome_sent, channels_status
+        except Exception as e:
+            logging.exception(f"Error getting user status for {user_id}")
             return False, False, {}
-        joined_all = bool(results[0][0])
-        welcome_sent = bool(results[0][1])
-        channels_status = {}
-        for result in results:
-            if result[2]:
-                channels_status[result[2]] = bool(result[3])
-        return joined_all, welcome_sent, channels_status
-    except Exception as e:
-        logging.exception(f"Error getting user status for {user_id}")
-        return False, False, {}
-    finally:
-        conn.close()
 
 def update_welcome_sent(user_id, sent=True):
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    try:
-        cursor.execute('UPDATE users SET welcome_sent = ? WHERE user_id = ?', (1 if sent else 0, user_id))
-        conn.commit()
-    except Exception as e:
-        logging.exception(f"Error updating welcome sent for {user_id}")
-        conn.rollback()
-    finally:
-        conn.close()
+    with get_db() as conn:
+        cursor = conn.cursor()
+        try:
+            cursor.execute('UPDATE users SET welcome_sent = ? WHERE user_id = ?', (1 if sent else 0, user_id))
+            conn.commit()
+        except Exception as e:
+            logging.exception(f"Error updating welcome sent for {user_id}")
+            conn.rollback()
 
 def update_last_warning(user_id):
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    try:
-        cursor.execute('UPDATE users SET last_warning = ? WHERE user_id = ?', (datetime.now(), user_id))
-        conn.commit()
-    except Exception as e:
-        logging.exception(f"Error updating last warning for {user_id}")
-        conn.rollback()
-    finally:
-        conn.close()
+    with get_db() as conn:
+        cursor = conn.cursor()
+        try:
+            cursor.execute('UPDATE users SET last_warning = ? WHERE user_id = ?', (datetime.now(), user_id))
+            conn.commit()
+        except Exception as e:
+            logging.exception(f"Error updating last warning for {user_id}")
+            conn.rollback()
 
 def should_send_warning(user_id):
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    try:
-        cursor.execute('SELECT last_warning FROM users WHERE user_id = ?', (user_id,))
-        result = cursor.fetchone()
-        if not result or not result[0]:
+    with get_db() as conn:
+        cursor = conn.cursor()
+        try:
+            cursor.execute('SELECT last_warning FROM users WHERE user_id = ?', (user_id,))
+            result = cursor.fetchone()
+            if not result or not result[0]:
+                return True
+            last_warning = datetime.fromisoformat(result[0]) if isinstance(result[0], str) else result[0]
+            return datetime.now() - last_warning > timedelta(seconds=30)
+        except Exception as e:
+            logging.exception(f"Error checking warning time for {user_id}")
             return True
-        last_warning = datetime.fromisoformat(result[0]) if isinstance(result[0], str) else result[0]
-        return datetime.now() - last_warning > timedelta(seconds=30)
-    except Exception as e:
-        logging.exception(f"Error checking warning time for {user_id}")
-        return True
-    finally:
-        conn.close()
 
 def remove_user(user_id):
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    try:
-        cursor.execute('DELETE FROM channel_joins WHERE user_id = ?', (user_id,))
-        cursor.execute('DELETE FROM user_actions WHERE user_id = ?', (user_id,))
-        cursor.execute('DELETE FROM users WHERE user_id = ?', (user_id,))
-        conn.commit()
-        logging.info(f"Removed user {user_id}")
-    except Exception as e:
-        logging.exception(f"Error removing user {user_id}")
-        conn.rollback()
-    finally:
-        conn.close()
+    with get_db() as conn:
+        cursor = conn.cursor()
+        try:
+            cursor.execute('DELETE FROM channel_joins WHERE user_id = ?', (user_id,))
+            cursor.execute('DELETE FROM user_actions WHERE user_id = ?', (user_id,))
+            cursor.execute('DELETE FROM users WHERE user_id = ?', (user_id,))
+            conn.commit()
+            logging.info(f"Removed user {user_id}")
+        except Exception as e:
+            logging.exception(f"Error removing user {user_id}")
+            conn.rollback()
 
 init_database()
 client = TelegramClient(StringSession(session_string), api_id, api_hash)
@@ -415,6 +413,8 @@ async def send_welcome_message(event):
 # ---------- Command Handlers ----------
 @client.on(events.NewMessage(pattern='/pn'))
 async def pn_handler(event):
+    global current_target_chat
+    current_target_chat = event.chat_id
     try:
         user_id = event.sender_id
         joined_all, status_changed, channels_status = await check_user_joined_channels(user_id, event.sender)
@@ -473,6 +473,9 @@ async def pn_handler(event):
 
 @client.on(events.NewMessage(pattern='/again'))
 async def again_handler(event):
+    global current_target_chat
+    if event.chat_id in active_sessions:
+        current_target_chat = event.chat_id
     try:
         user_id = event.sender_id
         joined_all, _, _ = await check_user_joined_channels(user_id, event.sender)
@@ -496,6 +499,9 @@ async def again_handler(event):
 
 @client.on(events.NewMessage(pattern='/stop'))
 async def stop_handler(event):
+    global current_target_chat
+    if event.chat_id == current_target_chat:
+        current_target_chat = None
     try:
         if event.chat_id in active_sessions:
             del active_sessions[event.chat_id]
@@ -597,6 +603,7 @@ async def broadcast_handler(event):
         return
     await event.reply("Broadcasting...")
     conn = sqlite3.connect(DB_NAME)
+    conn.execute("PRAGMA busy_timeout=5000;")
     cursor = conn.cursor()
     cursor.execute('SELECT user_id FROM users')
     users = cursor.fetchall()
@@ -621,25 +628,16 @@ async def start_handler(event):
     )
     await event.reply(welcome, parse_mode='md')
 
-# ---------- Core Quiz Handler (fixed Poll creation) ----------
+# ---------- Core Quiz Handler ----------
+current_target_chat = None
+
 @client.on(events.NewMessage(from_users='QuizBot'))
 async def quiz_handler(event):
-    # We need to know which chat to send the final poll to.
-    # Since multiple chats can start quizzes, we track active_sessions.
-    # However, QuizBot sends messages to the bot's private chat, so we cannot
-    # know which user's group triggered it. We'll use a simple approach:
-    # store the most recent target chat (like original) but with better handling.
-    # For simplicity, we use a global variable that is set by /pn.
-    # To avoid collisions, we'll store the target chat in a dict keyed by QuizBot
-    # message? Not trivial. We'll keep the original single-target approach but
-    # with a warning. Alternatively, we can store the mapping in a database.
-    # Given the scope, we'll use a global variable `current_target_chat`.
     global current_target_chat
     if not current_target_chat:
         return
 
     msg = event.message
-    # Click "I am ready" button if present
     if msg.buttons:
         for i, row in enumerate(msg.buttons):
             for j, btn in enumerate(row):
@@ -652,7 +650,6 @@ async def quiz_handler(event):
                     return
 
     if msg.poll and msg.poll.poll.quiz:
-        # Vote randomly
         answers = msg.poll.poll.answers
         if not answers:
             logging.error("No answers in poll")
@@ -672,7 +669,6 @@ async def quiz_handler(event):
             await client.send_message(current_target_chat, f"Vote error: {str(e)}")
             return
 
-        # Wait for results
         await asyncio.sleep(2)
         updated = await client.get_messages('QuizBot', ids=msg.id)
         attempts = 0
@@ -686,7 +682,6 @@ async def quiz_handler(event):
             await client.send_message(current_target_chat, "Error: No results received.")
             return
 
-        # Find correct option
         correct = None
         for res in updated.poll.results.results:
             if res.correct:
@@ -697,14 +692,12 @@ async def quiz_handler(event):
             await client.send_message(current_target_chat, "Error: No correct answer.")
             return
 
-        # Extract and clean question/answers
         original = updated.poll.poll
         question_text = original.question.text
         entities = original.question.entities or []
         twe_orig = types.TextWithEntities(text=question_text, entities=entities)
         twe_no_emoji = remove_emojis_preserve_entities(twe_orig)
 
-        # Remove numbering prefixes
         num_pattern = re.compile(
             r'^(?:\[?\s*\d+\s*(?:of|\/)\s*\d+\s*\]?\s*[.:]?\s*|Question\s+\d+\s*(?:of|\/)\s*\d+\s*[.:]?\s*|\(\s*\d+\s*/\s*\d+\s*\)\s*|Q\s*\d+\s*[.:]?\s*)',
             re.IGNORECASE
@@ -718,7 +711,6 @@ async def quiz_handler(event):
             prefix_len += m.end()
             clean_text = clean_text[m.end():]
 
-        # Adjust entities
         new_entities = []
         for ent in twe_no_emoji.entities:
             old_start = ent.offset
@@ -735,7 +727,6 @@ async def quiz_handler(event):
         question = types.TextWithEntities(text=clean_text, entities=new_entities)
         logging.info(f"Cleaned question: {question.text}")
 
-        # Clean answers
         answer_list = []
         answer_options = []
         for ans in original.answers:
@@ -750,16 +741,13 @@ async def quiz_handler(event):
             await client.send_message(current_target_chat, "Error: No valid answers.")
             return
 
-        # Verify correct option exists
         if correct not in answer_options:
             logging.error(f"Correct option {correct!r} not in {answer_options!r}")
             await client.send_message(current_target_chat, "Error: Correct answer mismatch.")
             return
 
-        # Generate a random 64-bit hash for the poll
         poll_hash = random.getrandbits(64)
 
-        # Create the poll (with hash)
         poll = types.Poll(
             id=int(time.time()),
             question=question,
@@ -777,7 +765,6 @@ async def quiz_handler(event):
             logging.info("Poll sent successfully")
             await asyncio.sleep(1)
 
-            # Create closed version (same hash)
             closed_poll = types.Poll(
                 id=poll.id,
                 question=question,
@@ -795,49 +782,9 @@ async def quiz_handler(event):
                 media=closed_media
             ))
             logging.info("Poll closed after sending")
-            # Clear session after poll is sent? We'll keep it for /again.
         except Exception as e:
             logging.exception("Failed to send/close poll")
             await client.send_message(current_target_chat, f"Poll error: {str(e)}")
-
-# Global variable to store the target chat for the current quiz (simplified)
-current_target_chat = None
-
-# Override pn_handler to set current_target_chat
-original_pn = pn_handler
-
-@events.register(events.NewMessage(pattern='/pn'))
-async def pn_handler_with_target(event):
-    global current_target_chat
-    current_target_chat = event.chat_id
-    await original_pn(event)
-
-# Re-register properly – we need to replace the handler. Let's do it cleanly:
-# Remove the old handler and add new one
-client.remove_event_handler(pn_handler)
-client.add_event_handler(pn_handler_with_target)
-
-# Also for /again we should ensure current_target_chat is set
-@events.register(events.NewMessage(pattern='/again'))
-async def again_with_target(event):
-    global current_target_chat
-    if event.chat_id in active_sessions:
-        current_target_chat = event.chat_id
-    await again_handler(event)
-
-client.remove_event_handler(again_handler)
-client.add_event_handler(again_with_target)
-
-# For /stop, clear the target if it matches
-@events.register(events.NewMessage(pattern='/stop'))
-async def stop_with_cleanup(event):
-    global current_target_chat
-    if event.chat_id == current_target_chat:
-        current_target_chat = None
-    await stop_handler(event)
-
-client.remove_event_handler(stop_handler)
-client.add_event_handler(stop_with_cleanup)
 
 async def main():
     await client.start()
