@@ -13,18 +13,15 @@ import contextlib
 from datetime import datetime, timedelta
 import os
 
-# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(name)s - %(message)s'
 )
 
-# Replace with your values
 api_id = '12380656'
 api_hash = 'd927c13beaaf5110f25c505b7c071273'
 session_string = '1BZWaqwUAUCh6H9L_y-ZZABkOOGCyTm5ytu3pUTT3qQbkogiGlJs-XxvmRr241FhkpKi5k-INCsFfZ7yAtNwcweGlipYLRo5dWGZd_RUpNIPYjJjfRvkZ4W84mJos03u-qMqOvCp1S94-Uub7Ts__1iMC7sbQxwzKicwQ0AdbvOEBUccBaVqIW5b-Pku6U3FJo5pJ3r1ZkmUlXK69ugXfgUMT4dinnamUMqRtIVe9EczMnuwCQqUzXBLdlzY5NsadxPXDEWsH7nmpVLfIuFi7HuUACettKV6cYzgzYtshNjLuYHZgZNb81n0Y78ozS4yYyvkKCt0afruNQ8FSr_PY9TYpCv8Zq_w='
 
-# Channel IDs that users must join
 REQUIRED_CHANNELS = [
     '@exampurrs',
     '@exampurss_official',
@@ -41,16 +38,15 @@ CHANNEL_DISPLAY = {
 
 DB_NAME = 'poll_bot.db'
 ADMIN_IDS = [6644859358, 8451305181, 7183060880]
+QUIZBOT_ID = 983000232                     # will be resolved in main()
 
-# Store active quiz session: chat_id -> quiz_id
 active_sessions = {}
 
 # ---------- Database helpers ----------
 @contextlib.contextmanager
 def get_db():
-    """Open a connection with WAL-mode busy timeout, auto-close."""
     conn = sqlite3.connect(DB_NAME)
-    conn.execute("PRAGMA busy_timeout=10000;")  # 10 seconds
+    conn.execute("PRAGMA busy_timeout=10000;")
     try:
         yield conn
     finally:
@@ -58,11 +54,8 @@ def get_db():
 
 def init_database():
     with get_db() as conn:
-        # Enable WAL mode – persists for the file
         conn.execute("PRAGMA journal_mode=WAL;")
-        # Extra safety for this init
         conn.execute("PRAGMA busy_timeout=10000;")
-
         cursor = conn.cursor()
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
         users_table_exists = cursor.fetchone() is not None
@@ -139,14 +132,14 @@ def update_user_channels(user_id, channels_status, user_info=None):
                         last_name = COALESCE(?, last_name),
                         last_check = ?
                     WHERE user_id = ?
-                    ''', (user_info.get('username'), user_info.get('first_name'), 
+                    ''', (user_info.get('username'), user_info.get('first_name'),
                           user_info.get('last_name'), datetime.now(), user_id))
                 else:
                     cursor.execute('''
                     INSERT INTO users 
                     (user_id, username, first_name, last_name, last_check) 
                     VALUES (?, ?, ?, ?, ?)
-                    ''', (user_id, user_info.get('username'), user_info.get('first_name'), 
+                    ''', (user_id, user_info.get('username'), user_info.get('first_name'),
                           user_info.get('last_name'), datetime.now()))
             else:
                 cursor.execute('INSERT OR IGNORE INTO users (user_id, last_check) VALUES (?, ?)', (user_id, datetime.now()))
@@ -164,10 +157,7 @@ def update_user_channels(user_id, channels_status, user_info=None):
             ''', (1 if has_joined_all else 0, datetime.now(), user_id))
             cursor.execute('INSERT INTO user_actions (user_id, action) VALUES (?, ?)',
                            (user_id, f"channel_check_{'all_joined' if has_joined_all else 'missing_channels'}"))
-
-            # IMPORTANT: pass the same connection to avoid nested write lock
             update_bot_stats(conn)
-
             conn.commit()
             status_changed = previous_joined_all != has_joined_all
             return has_joined_all, status_changed
@@ -311,13 +301,9 @@ def remove_user(user_id):
             logging.exception(f"Error removing user {user_id}")
             conn.rollback()
 
-# ---------- Initialise the database ----------
 init_database()
-
-# ---------- Telegram client ----------
 client = TelegramClient(StringSession(session_string), api_id, api_hash)
 
-# Emoji removal pattern (unchanged)
 emoji_pattern = re.compile(
     "["
     "\U0001F600-\U0001F64F"
@@ -474,7 +460,6 @@ async def pn_handler(event):
             await event.reply('Invalid quiz share format.')
             return
 
-        # Store session
         active_sessions[event.chat_id] = quiz_id
         logging.info(f"Starting quiz {quiz_id} for chat {event.chat_id}")
         await client.send_message('QuizBot', '/stop')
@@ -616,7 +601,7 @@ async def broadcast_handler(event):
         await event.reply("Usage: `/broadcast message`")
         return
     await event.reply("Broadcasting...")
-    with get_db() as conn:   # use the safe helper
+    with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute('SELECT user_id FROM users')
         users = cursor.fetchall()
@@ -640,13 +625,15 @@ async def start_handler(event):
     )
     await event.reply(welcome, parse_mode='md')
 
-# ---------- Core Quiz Handler ----------
+# ---------- Core Quiz Handler (using resolved ID) ----------
 current_target_chat = None
 
-@client.on(events.NewMessage(from_users='QuizBot'))
+@client.on(events.NewMessage(from_users=lambda: QUIZBOT_ID))  # dynamic lookup
 async def quiz_handler(event):
     global current_target_chat
+    logging.info("quiz_handler triggered")
     if not current_target_chat:
+        logging.warning("quiz_handler: no target chat")
         return
 
     msg = event.message
@@ -800,9 +787,16 @@ async def quiz_handler(event):
 
 # ---------- Main ----------
 async def main():
+    global QUIZBOT_ID
     await client.start()
     logging.info("Bot started successfully!")
-    update_bot_stats()  # standalone call (opens its own connection)
+    try:
+        QUIZBOT_ID = (await client.get_input_entity('@QuizBot')).user_id
+        logging.info(f"Resolved QuizBot ID: {QUIZBOT_ID}")
+    except Exception as e:
+        logging.exception("Cannot resolve QuizBot, using fallback ID 5510360885")
+        QUIZBOT_ID = 983000232   # known ID of @QuizBot
+    update_bot_stats()
     await client.run_until_disconnected()
 
 if __name__ == '__main__':
