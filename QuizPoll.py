@@ -38,7 +38,6 @@ CHANNEL_DISPLAY = {
 
 DB_NAME = 'poll_bot.db'
 ADMIN_IDS = [6644859358, 8451305181, 7183060880]
-QUIZBOT_ID = 983000232                     # will be resolved in main()
 
 active_sessions = {}
 
@@ -625,10 +624,11 @@ async def start_handler(event):
     )
     await event.reply(welcome, parse_mode='md')
 
-# ---------- Core Quiz Handler (using resolved ID) ----------
+# ---------- Core Quiz Handler ----------
 current_target_chat = None
 
-@client.on(events.NewMessage(from_users=lambda: QUIZBOT_ID))  # dynamic lookup
+# Use the hardcoded numeric ID of @QuizBot (resolved at startup)
+@client.on(events.NewMessage(from_users=983000232))
 async def quiz_handler(event):
     global current_target_chat
     logging.info("quiz_handler triggered")
@@ -787,15 +787,14 @@ async def quiz_handler(event):
 
 # ---------- Main ----------
 async def main():
-    global QUIZBOT_ID
     await client.start()
     logging.info("Bot started successfully!")
+    # Resolve QuizBot ID just for logging; the hardcoded value is used above
     try:
-        QUIZBOT_ID = (await client.get_input_entity('@QuizBot')).user_id
-        logging.info(f"Resolved QuizBot ID: {QUIZBOT_ID}")
-    except Exception as e:
-        logging.exception("Cannot resolve QuizBot, using fallback ID 5510360885")
-        QUIZBOT_ID = 983000232   # known ID of @QuizBot
+        qid = (await client.get_input_entity('@QuizBot')).user_id
+        logging.info(f"Resolved QuizBot ID (for reference): {qid}")
+    except Exception:
+        logging.warning("Could not resolve @QuizBot, but hardcoded ID 983000232 is used.")
     update_bot_stats()
     await client.run_until_disconnected()
 
