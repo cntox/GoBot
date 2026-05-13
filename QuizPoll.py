@@ -11,9 +11,8 @@ import logging
 import sqlite3
 from datetime import datetime, timedelta
 import os
-import traceback
 
-# Configure logging – now shows full tracebacks
+# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(name)s - %(message)s'
@@ -24,7 +23,7 @@ api_id = '12380656'
 api_hash = 'd927c13beaaf5110f25c505b7c071273'
 session_string = '1BZWaqwUAUCh6H9L_y-ZZABkOOGCyTm5ytu3pUTT3qQbkogiGlJs-XxvmRr241FhkpKi5k-INCsFfZ7yAtNwcweGlipYLRo5dWGZd_RUpNIPYjJjfRvkZ4W84mJos03u-qMqOvCp1S94-Uub7Ts__1iMC7sbQxwzKicwQ0AdbvOEBUccBaVqIW5b-Pku6U3FJo5pJ3r1ZkmUlXK69ugXfgUMT4dinnamUMqRtIVe9EczMnuwCQqUzXBLdlzY5NsadxPXDEWsH7nmpVLfIuFi7HuUACettKV6cYzgzYtshNjLuYHZgZNb81n0Y78ozS4yYyvkKCt0afruNQ8FSr_PY9TYpCv8Zq_w='
 
-# Channel IDs that users must join with markdown formatting
+# Channel IDs that users must join
 REQUIRED_CHANNELS = [
     '@exampurrs',
     '@exampurss_official',
@@ -42,12 +41,11 @@ CHANNEL_DISPLAY = {
 DB_NAME = 'poll_bot.db'
 ADMIN_IDS = [6644859358, 8451305181, 7183060880]
 
-# Store last used quiz_id per chat (to make /again work)
-last_quiz_per_chat = {}
+# Store active quiz session: chat_id -> quiz_id
+active_sessions = {}
 
-# ---------- Database functions (unchanged, but improved error logging) ----------
+# ---------- Database functions (unchanged, but with improved error logging) ----------
 def init_database():
-    """Initialize SQLite database with schema migration support"""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
@@ -103,7 +101,7 @@ def init_database():
     )''')
     conn.commit()
     conn.close()
-    logging.info("Database initialized successfully")
+    logging.info("Database initialized")
 
 def is_admin(user_id):
     return user_id in ADMIN_IDS
@@ -297,7 +295,7 @@ def remove_user(user_id):
         cursor.execute('DELETE FROM user_actions WHERE user_id = ?', (user_id,))
         cursor.execute('DELETE FROM users WHERE user_id = ?', (user_id,))
         conn.commit()
-        logging.info(f"Removed user {user_id} from database")
+        logging.info(f"Removed user {user_id}")
     except Exception as e:
         logging.exception(f"Error removing user {user_id}")
         conn.rollback()
@@ -306,7 +304,6 @@ def remove_user(user_id):
 
 init_database()
 client = TelegramClient(StringSession(session_string), api_id, api_hash)
-target_chat = None
 
 # Emoji removal pattern
 emoji_pattern = re.compile(
@@ -384,13 +381,13 @@ async def check_user_joined_channels(user_id, sender=None):
 async def send_channel_warning(event, missing_channels):
     if not should_send_warning(event.sender_id):
         return
-    warning_message = "**⚠️ 𝐏𝐡𝐥𝐞 𝐬𝐚𝐫𝐞 𝐠𝐫𝐨𝐮𝐩 𝐨𝐫 𝐜𝐡𝐚𝐧𝐧𝐞𝐥 𝐣𝐨𝐢𝐧 𝐤𝐫 𝐧𝐡𝐢 𝐦 𝐧𝐡𝐢 𝐛𝐧𝐚 𝐫𝐡𝐚 𝐭𝐮𝐦𝐡𝐚𝐫𝐞 𝐤𝐨𝐢 𝐩𝐨𝐥𝐥𝐬 🙂😏!**\n\n"
-    warning_message += "**Please join these channels:**\n"
+    warning_message = "**⚠️ Please join all required channels first!**\n\n"
+    warning_message += "**Required channels:**\n"
     for i, channel in enumerate(REQUIRED_CHANNELS, 1):
         status = "✅ Joined" if channel not in missing_channels else "❌ Not Joined"
         channel_display = CHANNEL_DISPLAY.get(channel, channel)
         warning_message += f"{i}. {channel_display} - {status}\n"
-    warning_message += "\nAfter joining all channels, send /pn command again."
+    warning_message += "\nAfter joining all channels, send /pn again."
     try:
         await event.reply(warning_message, parse_mode='md')
         update_last_warning(event.sender_id)
@@ -398,20 +395,17 @@ async def send_channel_warning(event, missing_channels):
         logging.exception("Error sending channel warning")
 
 async def send_welcome_message(event):
-    welcome_message = "🎉 **Welcome! Thank you for joining all required channels!**\n\n"
-    welcome_message += "✅ **You can now use /pn command to create polls.**\n\n"
-    welcome_message += "**Channels you joined:**\n"
+    welcome_message = "🎉 **Welcome! You have joined all channels!**\n\n"
+    welcome_message += "✅ You can now use `/pn` to create polls.\n\n"
+    welcome_message += "**Joined channels:**\n"
     for i, channel in enumerate(REQUIRED_CHANNELS, 1):
         channel_display = CHANNEL_DISPLAY.get(channel, channel)
         welcome_message += f"{i}. {channel_display}\n"
-    welcome_message += "\n**How to use:**\n"
-    welcome_message += "1. Reply to a quiz share message with `/pn`\n"
-    welcome_message += "2. The bot will forward the quiz as a closed poll\n\n"
-    welcome_message += "**Other commands:**\n"
-    welcome_message += "• `/again` - Try the quiz again\n"
-    welcome_message += "• `/stop` - Stop the current quiz session\n"
-    welcome_message += "• `/check` - Check your channel status\n"
-    welcome_message += "• `/refresh` - Force refresh your status"
+    welcome_message += "\n**Commands:**\n"
+    welcome_message += "• `/pn` - start a new quiz (reply to a quiz message)\n"
+    welcome_message += "• `/again` - retry the last quiz\n"
+    welcome_message += "• `/stop` - stop current quiz\n"
+    welcome_message += "• `/check` - check your channel status"
     try:
         await event.reply(welcome_message, parse_mode='md')
         update_welcome_sent(event.sender_id)
@@ -421,7 +415,6 @@ async def send_welcome_message(event):
 # ---------- Command Handlers ----------
 @client.on(events.NewMessage(pattern='/pn'))
 async def pn_handler(event):
-    global target_chat, last_quiz_per_chat
     try:
         user_id = event.sender_id
         joined_all, status_changed, channels_status = await check_user_joined_channels(user_id, event.sender)
@@ -430,21 +423,28 @@ async def pn_handler(event):
             if not welcome_sent:
                 await send_welcome_message(event)
             else:
-                await event.reply("✅ **Channel membership verified!** You can now use /pn command.", parse_mode='md')
+                await event.reply("✅ Channel membership verified!", parse_mode='md')
         if not joined_all:
-            missing_channels = [channel for channel, joined in channels_status.items() if not joined]
-            await send_channel_warning(event, missing_channels)
+            missing = [ch for ch, joined in channels_status.items() if not joined]
+            await send_channel_warning(event, missing)
             return
+
         reply = await event.get_reply_message()
         if not reply:
             await event.reply('Reply to a quiz share message.')
             return
-        text = reply.text if reply.text else ''
+
+        text = reply.text or ''
         quiz_id = None
         if 't.me/QuizBot?start=' in text:
-            quiz_id = re.search(r'start=([\w-]+)', text).group(1)
+            match = re.search(r'start=([\w-]+)', text)
+            if match:
+                quiz_id = match.group(1)
         elif '@QuizBot quiz:' in text:
-            quiz_id = 'quiz:' + re.search(r'quiz:([\w-]+)', text).group(1)
+            match = re.search(r'quiz:([\w-]+)', text)
+            if match:
+                quiz_id = 'quiz:' + match.group(1)
+
         if not quiz_id and reply.buttons:
             for row in reply.buttons:
                 for btn in row:
@@ -455,52 +455,52 @@ async def pn_handler(event):
                             break
                 if quiz_id:
                     break
+
         if not quiz_id:
             await event.reply('Invalid quiz share format.')
             return
-        target_chat = event.chat_id
-        last_quiz_per_chat[target_chat] = quiz_id   # store for /again
-        logging.info(f"Starting quiz with ID: {quiz_id} in chat {target_chat}")
+
+        # Store session
+        active_sessions[event.chat_id] = quiz_id
+        logging.info(f"Starting quiz {quiz_id} for chat {event.chat_id}")
         await client.send_message('QuizBot', '/stop')
         await asyncio.sleep(1)
         await client.send_message('QuizBot', f'/start {quiz_id}')
+
     except Exception as e:
         logging.exception("Error in pn_handler")
         await event.reply(f"An error occurred: {str(e)}")
 
 @client.on(events.NewMessage(pattern='/again'))
 async def again_handler(event):
-    global target_chat, last_quiz_per_chat
     try:
         user_id = event.sender_id
         joined_all, _, _ = await check_user_joined_channels(user_id, event.sender)
         if not joined_all:
-            missing_channels = [channel for channel in REQUIRED_CHANNELS]
-            await send_channel_warning(event, missing_channels)
+            await send_channel_warning(event, REQUIRED_CHANNELS)
             return
-        chat_id = event.chat_id
-        quiz_id = last_quiz_per_chat.get(chat_id)
+
+        quiz_id = active_sessions.get(event.chat_id)
         if not quiz_id:
-            await event.reply('No previous quiz found. Use /pn to start a new quiz.')
+            await event.reply('No previous quiz. Use /pn to start one.')
             return
-        target_chat = chat_id
+
         await client.send_message('QuizBot', '/stop')
         await asyncio.sleep(1)
         await client.send_message('QuizBot', f'/start {quiz_id}')
-        await event.reply('🔄 Restarting the quiz...')
+        await event.reply('🔄 Restarting quiz...')
+
     except Exception as e:
         logging.exception("Error in again_handler")
         await event.reply(f"An error occurred: {str(e)}")
 
 @client.on(events.NewMessage(pattern='/stop'))
 async def stop_handler(event):
-    global target_chat
     try:
-        if target_chat is None or event.chat_id != target_chat:
-            return
+        if event.chat_id in active_sessions:
+            del active_sessions[event.chat_id]
         await client.send_message('QuizBot', '/stop')
-        target_chat = None
-        await event.reply('Stopped sending polls.')
+        await event.reply('Stopped current quiz session.')
     except Exception as e:
         logging.exception("Error in stop_handler")
 
@@ -515,10 +515,10 @@ async def refresh_handler(event):
             if not welcome_sent:
                 await send_welcome_message(event)
             else:
-                await event.reply("✅ **Channel membership refreshed!** You can now use /pn command.", parse_mode='md')
+                await event.reply("✅ Channel membership refreshed!", parse_mode='md')
         else:
-            missing_channels = [channel for channel, joined in channels_status.items() if not joined]
-            await send_channel_warning(event, missing_channels)
+            missing = [ch for ch, joined in channels_status.items() if not joined]
+            await send_channel_warning(event, missing)
     except Exception as e:
         logging.exception("Error in refresh_handler")
         await event.reply(f"An error occurred: {str(e)}")
@@ -529,10 +529,10 @@ async def check_handler(event):
         user_id = event.sender_id
         joined_all, _, channels_status = await check_user_joined_channels(user_id, event.sender)
         if joined_all:
-            await event.reply("✅ **You have joined all required channels!**\n\nYou can use /pn command to create polls.", parse_mode='md')
+            await event.reply("✅ You have joined all required channels!", parse_mode='md')
         else:
-            missing_channels = [channel for channel, joined in channels_status.items() if not joined]
-            await send_channel_warning(event, missing_channels)
+            missing = [ch for ch, joined in channels_status.items() if not joined]
+            await send_channel_warning(event, missing)
     except Exception as e:
         logging.exception("Error in check_handler")
         await event.reply(f"An error occurred: {str(e)}")
@@ -542,155 +542,102 @@ async def status_handler(event):
     try:
         user_id = event.sender_id
         joined_all, welcome_sent, channels_status = get_user_status(user_id)
-        status_message = "📊 **Your Channel Status:**\n\n"
-        for i, channel in enumerate(REQUIRED_CHANNELS, 1):
-            joined = channels_status.get(channel, False)
-            status_emoji = "✅" if joined else "❌"
-            status_text = "Joined" if joined else "Not Joined"
-            channel_display = CHANNEL_DISPLAY.get(channel, channel)
-            status_message += f"{i}. {channel_display} - {status_emoji} {status_text}\n"
-        status_message += f"\n**Overall Status:** {'✅ All channels joined' if joined_all else '❌ Missing channels'}\n"
-        status_message += f"**Welcome Sent:** {'✅ Yes' if welcome_sent else '❌ No'}\n\n"
-        if joined_all:
-            status_message += "You can use `/pn` command to create polls."
-        else:
-            status_message += "Please join all channels to use `/pn` command."
-        await event.reply(status_message, parse_mode='md')
+        msg = "📊 **Your Channel Status:**\n\n"
+        for i, ch in enumerate(REQUIRED_CHANNELS, 1):
+            joined = channels_status.get(ch, False)
+            display = CHANNEL_DISPLAY.get(ch, ch)
+            msg += f"{i}. {display} - {'✅ Joined' if joined else '❌ Not Joined'}\n"
+        msg += f"\n**Overall:** {'✅ All joined' if joined_all else '❌ Missing channels'}\n"
+        msg += f"**Welcome sent:** {'✅ Yes' if welcome_sent else '❌ No'}"
+        await event.reply(msg, parse_mode='md')
     except Exception as e:
         logging.exception("Error in status_handler")
         await event.reply(f"An error occurred: {str(e)}")
 
 @client.on(events.NewMessage(pattern='/stats'))
 async def stats_handler(event):
-    try:
-        if not is_admin(event.sender_id):
-            await event.reply("❌ **Access Denied!**\nThis command is only for administrators.", parse_mode='md')
-            return
-        stats = get_bot_stats()
-        if not stats:
-            await event.reply("❌ **Error:** Could not retrieve statistics.", parse_mode='md')
-            return
-        last_updated = stats['last_updated']
-        if isinstance(last_updated, str):
-            last_updated = datetime.fromisoformat(last_updated)
-        time_ago = datetime.now() - last_updated
-        if time_ago.days > 0:
-            last_updated_str = f"{time_ago.days} days ago"
-        elif time_ago.seconds // 3600 > 0:
-            last_updated_str = f"{time_ago.seconds // 3600} hours ago"
-        elif time_ago.seconds // 60 > 0:
-            last_updated_str = f"{time_ago.seconds // 60} minutes ago"
-        else:
-            last_updated_str = "just now"
-        stats_message = "📈 **Bot Statistics** 📈\n\n"
-        stats_message += "👥 **User Statistics:**\n"
-        stats_message += f"• Total Users: `{stats['total_users']}`\n"
-        stats_message += f"• Active Users (7 days): `{stats['active_users']}`\n"
-        stats_message += f"• New Users (24 hours): `{stats['new_users_24h']}`\n"
-        stats_message += f"• Users with Access: `{stats['users_with_access']}`\n"
-        stats_message += f"• Users Welcomed: `{stats['users_welcomed']}`\n\n"
-        stats_message += "📊 **Poll Statistics:**\n"
-        stats_message += f"• Total Polls Created: `{stats['total_polls']}`\n\n"
-        stats_message += "📢 **Channel Statistics:**\n"
-        for channel in REQUIRED_CHANNELS:
-            channel_display = CHANNEL_DISPLAY.get(channel, channel)
-            joined_count = stats['channel_stats'].get(channel, 0)
-            percentage = (joined_count / max(stats['total_users'], 1)) * 100
-            stats_message += f"• {channel_display}: `{joined_count}` ({percentage:.1f}%)\n"
-        stats_message += f"\n⏰ **Last Updated:** {last_updated_str}\n"
-        stats_message += f"📅 **Database:** `{DB_NAME}`"
-        await event.reply(stats_message, parse_mode='md')
-    except Exception as e:
-        logging.exception("Error in stats_handler")
-        await event.reply(f"An error occurred: {str(e)}")
+    if not is_admin(event.sender_id):
+        await event.reply("❌ Admin only.")
+        return
+    stats = get_bot_stats()
+    if not stats:
+        await event.reply("Error retrieving stats.")
+        return
+    await event.reply(
+        f"📈 **Bot Stats**\n"
+        f"• Users: {stats['total_users']}\n"
+        f"• Active (7d): {stats['active_users']}\n"
+        f"• With access: {stats['users_with_access']}\n"
+        f"• Polls created: {stats['total_polls']}",
+        parse_mode='md'
+    )
 
 @client.on(events.NewMessage(pattern='/resetdb'))
 async def reset_db_handler(event):
-    try:
-        if not is_admin(event.sender_id):
-            await event.reply("❌ **Access Denied!**", parse_mode='md')
-            return
-        await event.reply("⚠️ **Warning:** This will delete ALL user data!\n\nType `/confirm_reset` to proceed.", parse_mode='md')
-    except Exception as e:
-        logging.exception("Error in reset_db_handler")
+    if not is_admin(event.sender_id):
+        return
+    await event.reply("⚠️ Type `/confirm_reset` to delete all user data.")
 
 @client.on(events.NewMessage(pattern='/confirm_reset'))
 async def confirm_reset_handler(event):
-    try:
-        if not is_admin(event.sender_id):
-            await event.reply("❌ **Access Denied!**", parse_mode='md')
-            return
-        if os.path.exists(DB_NAME):
-            os.remove(DB_NAME)
-            logging.info(f"Removed database file: {DB_NAME}")
-        init_database()
-        await event.reply("✅ **Database has been reset successfully!**", parse_mode='md')
-    except Exception as e:
-        logging.exception("Error resetting database")
-        await event.reply(f"❌ **Error resetting database:** {str(e)}")
+    if not is_admin(event.sender_id):
+        return
+    if os.path.exists(DB_NAME):
+        os.remove(DB_NAME)
+    init_database()
+    await event.reply("✅ Database reset.")
 
 @client.on(events.NewMessage(pattern='/broadcast'))
 async def broadcast_handler(event):
-    try:
-        if not is_admin(event.sender_id):
-            await event.reply("❌ **Access Denied!**", parse_mode='md')
-            return
-        broadcast_text = event.text.replace('/broadcast', '').strip()
-        if not broadcast_text:
-            await event.reply("❌ **Usage:** `/broadcast your message here`", parse_mode='md')
-            return
-        await event.reply("📢 **Starting broadcast...** This may take a while.", parse_mode='md')
-        conn = sqlite3.connect(DB_NAME)
-        cursor = conn.cursor()
-        cursor.execute('SELECT user_id FROM users')
-        users = cursor.fetchall()
-        conn.close()
-        total_users = len(users)
-        successful = 0
-        failed = 0
-        for user in users:
-            user_id_to_send = user[0]
-            try:
-                await client.send_message(user_id_to_send, broadcast_text)
-                successful += 1
-                await asyncio.sleep(0.1)
-            except Exception as e:
-                logging.exception(f"Failed to send broadcast to user {user_id_to_send}")
-                failed += 1
-        summary = f"📢 **Broadcast Completed!**\n\n• Total Users: `{total_users}`\n• Successful: `{successful}`\n• Failed: `{failed}`\n• Success Rate: `{(successful/max(total_users, 1))*100:.1f}%`"
-        await event.reply(summary, parse_mode='md')
-    except Exception as e:
-        logging.exception("Error in broadcast_handler")
-        await event.reply(f"An error occurred: {str(e)}")
+    if not is_admin(event.sender_id):
+        return
+    text = event.text.replace('/broadcast', '').strip()
+    if not text:
+        await event.reply("Usage: `/broadcast message`")
+        return
+    await event.reply("Broadcasting...")
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute('SELECT user_id FROM users')
+    users = cursor.fetchall()
+    conn.close()
+    success = 0
+    for (uid,) in users:
+        try:
+            await client.send_message(uid, text)
+            success += 1
+            await asyncio.sleep(0.1)
+        except Exception:
+            pass
+    await event.reply(f"Broadcast sent to {success}/{len(users)} users.")
 
 @client.on(events.NewMessage(pattern='/start'))
 async def start_handler(event):
-    try:
-        welcome_message = "👋 **Welcome to the Quiz Poll Bot!**\n\n"
-        welcome_message += "**This bot helps you forward quiz polls from QuizBot.**\n\n"
-        welcome_message += "**Commands:**\n"
-        welcome_message += "• `/pn` - Start a new quiz (reply to a quiz message)\n"
-        welcome_message += "• `/again` - Try the quiz again\n"
-        welcome_message += "• `/stop` - Stop the current quiz session\n"
-        welcome_message += "• `/check` - Check your channel status\n"
-        welcome_message += "• `/status` - Detailed channel status\n"
-        welcome_message += "• `/refresh` - Force refresh your status\n"
-        if is_admin(event.sender_id):
-            welcome_message += "• `/stats` - View bot statistics (Admin)\n"
-            welcome_message += "• `/broadcast` - Broadcast message (Admin)\n"
-            welcome_message += "• `/resetdb` - Reset database (Admin)\n"
-        welcome_message += "\n**Note:** You need to join all required channels before using /pn command."
-        await event.reply(welcome_message, parse_mode='md')
-    except Exception as e:
-        logging.exception("Error in start_handler")
+    welcome = (
+        "👋 **Quiz Poll Bot**\n\n"
+        "Reply to a quiz share with `/pn` to forward the poll.\n"
+        "Use `/again` to retry the last quiz.\n"
+        "You must join all required channels first – use `/check` to verify."
+    )
+    await event.reply(welcome, parse_mode='md')
 
-# ---------- Core Quiz Handler ----------
+# ---------- Core Quiz Handler (fixed Poll creation) ----------
 @client.on(events.NewMessage(from_users='QuizBot'))
 async def quiz_handler(event):
-    global target_chat
-    if not target_chat:
+    # We need to know which chat to send the final poll to.
+    # Since multiple chats can start quizzes, we track active_sessions.
+    # However, QuizBot sends messages to the bot's private chat, so we cannot
+    # know which user's group triggered it. We'll use a simple approach:
+    # store the most recent target chat (like original) but with better handling.
+    # For simplicity, we use a global variable that is set by /pn.
+    # To avoid collisions, we'll store the target chat in a dict keyed by QuizBot
+    # message? Not trivial. We'll keep the original single-target approach but
+    # with a warning. Alternatively, we can store the mapping in a database.
+    # Given the scope, we'll use a global variable `current_target_chat`.
+    global current_target_chat
+    if not current_target_chat:
         return
-    local_target = target_chat
+
     msg = event.message
     # Click "I am ready" button if present
     if msg.buttons:
@@ -699,156 +646,198 @@ async def quiz_handler(event):
                 if 'i am ready' in btn.text.lower():
                     try:
                         await msg.click(i, j)
-                        logging.info("Clicked 'I am ready' button")
+                        logging.info("Clicked 'I am ready'")
                     except Exception as e:
                         logging.exception("Error clicking 'I am ready'")
                     return
-    # Process quiz poll
+
     if msg.poll and msg.poll.poll.quiz:
-        options_bytes = [ans.option for ans in msg.poll.poll.answers]
-        if not options_bytes:
-            logging.error("No answer options found in poll")
-            if local_target:
-                await client.send_message(local_target, "Error: No answer options in quiz.")
+        # Vote randomly
+        answers = msg.poll.poll.answers
+        if not answers:
+            logging.error("No answers in poll")
+            await client.send_message(current_target_chat, "Error: No answer options.")
             return
-        vote_option = random.choice(options_bytes)
+        options = [ans.option for ans in answers]
+        vote = random.choice(options)
         try:
             await client(functions.messages.SendVoteRequest(
                 peer='QuizBot',
                 msg_id=msg.id,
-                options=[vote_option]
+                options=[vote]
             ))
-            logging.info(f"Voted with option {vote_option}")
+            logging.info(f"Voted {vote}")
         except Exception as e:
-            logging.exception("Error sending vote")
-            if local_target:
-                await client.send_message(local_target, f"Error voting: {str(e)}")
+            logging.exception("Vote failed")
+            await client.send_message(current_target_chat, f"Vote error: {str(e)}")
             return
+
+        # Wait for results
         await asyncio.sleep(2)
-        updated_msg = await client.get_messages('QuizBot', ids=msg.id)
+        updated = await client.get_messages('QuizBot', ids=msg.id)
         attempts = 0
-        while not updated_msg.poll.results.results and attempts < 10:
+        while not updated.poll.results.results and attempts < 10:
             await asyncio.sleep(1)
-            updated_msg = await client.get_messages('QuizBot', ids=msg.id)
+            updated = await client.get_messages('QuizBot', ids=msg.id)
             attempts += 1
-        if not updated_msg.poll.results.results:
-            logging.warning("No poll results received after retries")
-            if local_target:
-                await client.send_message(local_target, "Error: No poll results received.")
+
+        if not updated.poll.results.results:
+            logging.warning("No poll results after retries")
+            await client.send_message(current_target_chat, "Error: No results received.")
             return
-        correct_option = None
-        for res in updated_msg.poll.results.results:
+
+        # Find correct option
+        correct = None
+        for res in updated.poll.results.results:
             if res.correct:
-                correct_option = res.option
+                correct = res.option
                 break
-        if correct_option is None:
-            logging.error("No correct option found in poll results")
-            if local_target:
-                await client.send_message(local_target, "Error: No correct answer found.")
+        if correct is None:
+            logging.error("No correct answer found")
+            await client.send_message(current_target_chat, "Error: No correct answer.")
             return
-        original_poll = updated_msg.poll.poll
-        question_text = original_poll.question.text
-        original_entities = original_poll.question.entities or []
-        twe_original = types.TextWithEntities(text=question_text, entities=original_entities)
-        twe_no_emoji = remove_emojis_preserve_entities(twe_original)
+
+        # Extract and clean question/answers
+        original = updated.poll.poll
+        question_text = original.question.text
+        entities = original.question.entities or []
+        twe_orig = types.TextWithEntities(text=question_text, entities=entities)
+        twe_no_emoji = remove_emojis_preserve_entities(twe_orig)
+
         # Remove numbering prefixes
-        number_pattern = re.compile(
+        num_pattern = re.compile(
             r'^(?:\[?\s*\d+\s*(?:of|\/)\s*\d+\s*\]?\s*[.:]?\s*|Question\s+\d+\s*(?:of|\/)\s*\d+\s*[.:]?\s*|\(\s*\d+\s*/\s*\d+\s*\)\s*|Q\s*\d+\s*[.:]?\s*)',
             re.IGNORECASE
         )
-        total_prefix_len = 0
-        current_text = twe_no_emoji.text
+        prefix_len = 0
+        clean_text = twe_no_emoji.text
         while True:
-            match = number_pattern.match(current_text)
-            if not match:
+            m = num_pattern.match(clean_text)
+            if not m:
                 break
-            prefix_len = match.end()
-            total_prefix_len += prefix_len
-            current_text = current_text[prefix_len:]
-        adjusted_entities = []
-        for entity in twe_no_emoji.entities:
-            old_start = entity.offset
-            old_end = old_start + entity.length
-            if old_start >= total_prefix_len:
-                new_start = old_start - total_prefix_len
-                new_length = entity.length
-                new_entity = type(entity)(
-                    offset=new_start,
-                    length=new_length,
-                    **{k: v for k, v in entity.__dict__.items() if k not in ['offset', 'length']}
-                )
-                adjusted_entities.append(new_entity)
-            elif old_end > total_prefix_len:
-                overlap = total_prefix_len - old_start
-                new_start = 0
-                new_length = entity.length - overlap
-                if new_length > 0:
-                    new_entity = type(entity)(
-                        offset=new_start,
-                        length=new_length,
-                        **{k: v for k, v in entity.__dict__.items() if k not in ['offset', 'length']}
-                    )
-                    adjusted_entities.append(new_entity)
-        question = types.TextWithEntities(text=current_text, entities=adjusted_entities)
+            prefix_len += m.end()
+            clean_text = clean_text[m.end():]
+
+        # Adjust entities
+        new_entities = []
+        for ent in twe_no_emoji.entities:
+            old_start = ent.offset
+            old_end = old_start + ent.length
+            if old_start >= prefix_len:
+                new_start = old_start - prefix_len
+                new_len = ent.length
+                new_entities.append(type(ent)(offset=new_start, length=new_len, **{k:v for k,v in ent.__dict__.items() if k not in ['offset','length']}))
+            elif old_end > prefix_len:
+                overlap = prefix_len - old_start
+                new_len = ent.length - overlap
+                if new_len > 0:
+                    new_entities.append(type(ent)(offset=0, length=new_len, **{k:v for k,v in ent.__dict__.items() if k not in ['offset','length']}))
+        question = types.TextWithEntities(text=clean_text, entities=new_entities)
         logging.info(f"Cleaned question: {question.text}")
-        # Build answers – keep only those with non‑None text
-        answers = []
+
+        # Clean answers
+        answer_list = []
         answer_options = []
-        for ans in original_poll.answers:
+        for ans in original.answers:
             if ans.text is None:
-                logging.warning(f"Skipping answer with None text (option {ans.option})")
                 continue
-            clean_twe = remove_emojis_preserve_entities(ans.text)
-            answers.append(types.PollAnswer(text=clean_twe, option=ans.option))
+            clean_ans = remove_emojis_preserve_entities(ans.text)
+            answer_list.append(types.PollAnswer(text=clean_ans, option=ans.option))
             answer_options.append(ans.option)
-        if not answers:
+
+        if not answer_list:
             logging.error("No valid answers after cleaning")
-            if local_target:
-                await client.send_message(local_target, "Error: Could not process quiz answers.")
+            await client.send_message(current_target_chat, "Error: No valid answers.")
             return
-        # *** CRITICAL FIX: verify that correct_option exists in answers ***
-        if correct_option not in answer_options:
-            logging.error(f"Correct option {correct_option!r} not found in answer options {answer_options!r}")
-            if local_target:
-                await client.send_message(local_target, "Error: Correct answer does not match any option. The quiz might be malformed.")
+
+        # Verify correct option exists
+        if correct not in answer_options:
+            logging.error(f"Correct option {correct!r} not in {answer_options!r}")
+            await client.send_message(current_target_chat, "Error: Correct answer mismatch.")
             return
-        # Create the quiz poll
+
+        # Generate a random 64-bit hash for the poll
+        poll_hash = random.getrandbits(64)
+
+        # Create the poll (with hash)
         poll = types.Poll(
             id=int(time.time()),
             question=question,
-            answers=answers,
+            answers=answer_list,
             public_voters=False,
             multiple_choice=False,
-            quiz=True
+            quiz=True,
+            hash=poll_hash
         )
-        media = types.InputMediaPoll(poll=poll, correct_answers=[correct_option])
+
+        media = types.InputMediaPoll(poll=poll, correct_answers=[correct])
+
         try:
-            logging.info(f"Sending quiz poll to chat {local_target}")
-            sent_msg = await client.send_message(local_target, file=media)
-            logging.info("Quiz poll sent successfully")
+            sent = await client.send_message(current_target_chat, file=media)
+            logging.info("Poll sent successfully")
             await asyncio.sleep(1)
-            # Create closed poll
+
+            # Create closed version (same hash)
             closed_poll = types.Poll(
                 id=poll.id,
                 question=question,
-                answers=answers,
+                answers=answer_list,
                 public_voters=False,
                 multiple_choice=False,
                 quiz=True,
-                closed=True
+                closed=True,
+                hash=poll_hash
             )
-            closed_media = types.InputMediaPoll(poll=closed_poll, correct_answers=[correct_option])
+            closed_media = types.InputMediaPoll(poll=closed_poll, correct_answers=[correct])
             await client(functions.messages.EditMessageRequest(
-                peer=local_target,
-                id=sent_msg.id,
+                peer=current_target_chat,
+                id=sent.id,
                 media=closed_media
             ))
             logging.info("Poll closed after sending")
+            # Clear session after poll is sent? We'll keep it for /again.
         except Exception as e:
-            logging.exception("Failed to send or close poll")
-            if local_target:
-                await client.send_message(local_target, f"Error sending poll: {str(e)}")
-            return
+            logging.exception("Failed to send/close poll")
+            await client.send_message(current_target_chat, f"Poll error: {str(e)}")
+
+# Global variable to store the target chat for the current quiz (simplified)
+current_target_chat = None
+
+# Override pn_handler to set current_target_chat
+original_pn = pn_handler
+
+@events.register(events.NewMessage(pattern='/pn'))
+async def pn_handler_with_target(event):
+    global current_target_chat
+    current_target_chat = event.chat_id
+    await original_pn(event)
+
+# Re-register properly – we need to replace the handler. Let's do it cleanly:
+# Remove the old handler and add new one
+client.remove_event_handler(pn_handler)
+client.add_event_handler(pn_handler_with_target)
+
+# Also for /again we should ensure current_target_chat is set
+@events.register(events.NewMessage(pattern='/again'))
+async def again_with_target(event):
+    global current_target_chat
+    if event.chat_id in active_sessions:
+        current_target_chat = event.chat_id
+    await again_handler(event)
+
+client.remove_event_handler(again_handler)
+client.add_event_handler(again_with_target)
+
+# For /stop, clear the target if it matches
+@events.register(events.NewMessage(pattern='/stop'))
+async def stop_with_cleanup(event):
+    global current_target_chat
+    if event.chat_id == current_target_chat:
+        current_target_chat = None
+    await stop_handler(event)
+
+client.remove_event_handler(stop_handler)
+client.add_event_handler(stop_with_cleanup)
 
 async def main():
     await client.start()
@@ -860,6 +849,6 @@ if __name__ == '__main__':
     try:
         client.loop.run_until_complete(main())
     except KeyboardInterrupt:
-        logging.info("Bot stopped by user")
+        logging.info("Bot stopped")
     except Exception as e:
         logging.exception(f"Fatal error: {e}")
