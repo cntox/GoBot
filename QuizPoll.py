@@ -442,7 +442,7 @@ async def pn_handler(event):
         elif '@QuizBot quiz:' in text:
             match = re.search(r'quiz:([\w-]+)', text)
             if match:
-                quiz_id = 'quiz:' + match.group(1)
+                quiz_id = match.group(1)
 
         if not quiz_id and reply.buttons:
             for row in reply.buttons:
@@ -627,8 +627,7 @@ async def start_handler(event):
 # ---------- Core Quiz Handler ----------
 current_target_chat = None
 
-# Use the hardcoded numeric ID of @QuizBot (resolved at startup)
-@client.on(events.NewMessage(from_users=983000232))
+@client.on(events.NewMessage(from_users=983000232))   # hardcoded QuizBot ID
 async def quiz_handler(event):
     global current_target_chat
     logging.info("quiz_handler triggered")
@@ -637,17 +636,31 @@ async def quiz_handler(event):
         return
 
     msg = event.message
+
+    # ---------- DIAGNOSTIC LOGGING ----------
     if msg.buttons:
         for i, row in enumerate(msg.buttons):
             for j, btn in enumerate(row):
-                if 'i am ready' in btn.text.lower():
+                btn_text = btn.text if hasattr(btn, 'text') else str(btn)
+                logging.info(f"  Button [{i}][{j}]: '{btn_text}'")
+    if msg.text:
+        logging.info(f"  Message text (first 100 chars): {msg.text[:100]}")
+    # ----------------------------------------
+
+    # Click any button that indicates the quiz is ready to start
+    if msg.buttons:
+        for i, row in enumerate(msg.buttons):
+            for j, btn in enumerate(row):
+                btn_lower = btn.text.lower() if hasattr(btn, 'text') else ''
+                if 'ready' in btn_lower or 'start' in btn_lower:
                     try:
                         await msg.click(i, j)
-                        logging.info("Clicked 'I am ready'")
+                        logging.info(f"Clicked button '{btn.text}'")
                     except Exception as e:
-                        logging.exception("Error clicking 'I am ready'")
+                        logging.exception(f"Error clicking button '{btn.text}'")
                     return
 
+    # Process the quiz poll
     if msg.poll and msg.poll.poll.quiz:
         answers = msg.poll.poll.answers
         if not answers:
@@ -789,12 +802,6 @@ async def quiz_handler(event):
 async def main():
     await client.start()
     logging.info("Bot started successfully!")
-    # Resolve QuizBot ID just for logging; the hardcoded value is used above
-    try:
-        qid = (await client.get_input_entity('@QuizBot')).user_id
-        logging.info(f"Resolved QuizBot ID (for reference): {qid}")
-    except Exception:
-        logging.warning("Could not resolve @QuizBot, but hardcoded ID 983000232 is used.")
     update_bot_stats()
     await client.run_until_disconnected()
 
