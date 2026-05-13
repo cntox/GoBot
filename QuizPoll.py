@@ -48,9 +48,9 @@ active_sessions = {}
 # ---------- Database helpers ----------
 @contextlib.contextmanager
 def get_db():
-    """Open a database connection with WAL-mode busy timeout, close when done."""
+    """Open a connection with WAL-mode busy timeout, auto-close."""
     conn = sqlite3.connect(DB_NAME)
-    conn.execute("PRAGMA busy_timeout=5000;")
+    conn.execute("PRAGMA busy_timeout=10000;")  # 10 seconds
     try:
         yield conn
     finally:
@@ -60,7 +60,8 @@ def init_database():
     with get_db() as conn:
         # Enable WAL mode – persists for the file
         conn.execute("PRAGMA journal_mode=WAL;")
-        conn.execute("PRAGMA busy_timeout=10000;")  # extra safety for this init
+        # Extra safety for this init
+        conn.execute("PRAGMA busy_timeout=10000;")
 
         cursor = conn.cursor()
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
@@ -163,7 +164,10 @@ def update_user_channels(user_id, channels_status, user_info=None):
             ''', (1 if has_joined_all else 0, datetime.now(), user_id))
             cursor.execute('INSERT INTO user_actions (user_id, action) VALUES (?, ?)',
                            (user_id, f"channel_check_{'all_joined' if has_joined_all else 'missing_channels'}"))
-            update_bot_stats()
+
+            # IMPORTANT: pass the same connection to avoid nested write lock
+            update_bot_stats(conn)
+
             conn.commit()
             status_changed = previous_joined_all != has_joined_all
             return has_joined_all, status_changed
@@ -172,25 +176,32 @@ def update_user_channels(user_id, channels_status, user_info=None):
             conn.rollback()
             return False, False
 
-def update_bot_stats():
-    with get_db() as conn:
+def update_bot_stats(conn=None):
+    own_conn = False
+    if conn is None:
+        conn = sqlite3.connect(DB_NAME)
+        conn.execute("PRAGMA busy_timeout=10000;")
+        own_conn = True
+    try:
         cursor = conn.cursor()
-        try:
-            cursor.execute('SELECT COUNT(*) FROM users')
-            total_users = cursor.fetchone()[0]
-            seven_days_ago = datetime.now() - timedelta(days=7)
-            cursor.execute('SELECT COUNT(*) FROM users WHERE last_check >= ?', (seven_days_ago,))
-            active_users = cursor.fetchone()[0]
-            cursor.execute("SELECT COUNT(*) FROM user_actions WHERE action LIKE '%channel_check_all_joined%'")
-            total_polls = cursor.fetchone()[0]
-            cursor.execute('''
-            INSERT OR REPLACE INTO bot_stats (id, total_users, active_users, total_polls, last_updated)
-            VALUES (1, ?, ?, ?, ?)
-            ''', (total_users, active_users, total_polls, datetime.now()))
-            conn.commit()
-        except Exception as e:
-            logging.exception("Error updating bot stats")
-            conn.rollback()
+        cursor.execute('SELECT COUNT(*) FROM users')
+        total_users = cursor.fetchone()[0]
+        seven_days_ago = datetime.now() - timedelta(days=7)
+        cursor.execute('SELECT COUNT(*) FROM users WHERE last_check >= ?', (seven_days_ago,))
+        active_users = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM user_actions WHERE action LIKE '%channel_check_all_joined%'")
+        total_polls = cursor.fetchone()[0]
+        cursor.execute('''
+        INSERT OR REPLACE INTO bot_stats (id, total_users, active_users, total_polls, last_updated)
+        VALUES (1, ?, ?, ?, ?)
+        ''', (total_users, active_users, total_polls, datetime.now()))
+        conn.commit()
+    except Exception as e:
+        logging.exception("Error updating bot stats")
+        conn.rollback()
+    finally:
+        if own_conn:
+            conn.close()
 
 def get_bot_stats():
     with get_db() as conn:
@@ -300,10 +311,13 @@ def remove_user(user_id):
             logging.exception(f"Error removing user {user_id}")
             conn.rollback()
 
+# ---------- Initialise the database ----------
 init_database()
+
+# ---------- Telegram client ----------
 client = TelegramClient(StringSession(session_string), api_id, api_hash)
 
-# Emoji removal pattern
+# Emoji removal pattern (unchanged)
 emoji_pattern = re.compile(
     "["
     "\U0001F600-\U0001F64F"
@@ -602,12 +616,10 @@ async def broadcast_handler(event):
         await event.reply("Usage: `/broadcast message`")
         return
     await event.reply("Broadcasting...")
-    conn = sqlite3.connect(DB_NAME)
-    conn.execute("PRAGMA busy_timeout=5000;")
-    cursor = conn.cursor()
-    cursor.execute('SELECT user_id FROM users')
-    users = cursor.fetchall()
-    conn.close()
+    with get_db() as conn:   # use the safe helper
+        cursor = conn.cursor()
+        cursor.execute('SELECT user_id FROM users')
+        users = cursor.fetchall()
     success = 0
     for (uid,) in users:
         try:
@@ -786,10 +798,11 @@ async def quiz_handler(event):
             logging.exception("Failed to send/close poll")
             await client.send_message(current_target_chat, f"Poll error: {str(e)}")
 
+# ---------- Main ----------
 async def main():
     await client.start()
     logging.info("Bot started successfully!")
-    update_bot_stats()
+    update_bot_stats()  # standalone call (opens its own connection)
     await client.run_until_disconnected()
 
 if __name__ == '__main__':
