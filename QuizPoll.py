@@ -166,6 +166,7 @@ async def quiz_handler(event):
             id=int(time.time()),
             question=question,
             answers=answers,
+            hash=0,
             public_voters=False,  # Ensures anonymous poll
             multiple_choice=False,
             quiz=True
