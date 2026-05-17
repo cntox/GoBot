@@ -18,7 +18,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 # Replace with your values
 api_id = '12380656'
 api_hash = 'd927c13beaaf5110f25c505b7c071273'
-session_string = '1BZWaqwUAUCh6H9L_y-ZZABkOOGCyTm5ytu3pUTT3qQbkogiGlJs-XxvmRr241FhkpKi5k-INCsFfZ7yAtNwcweGlipYLRo5dWGZd_RUpNIPYjJjfRvkZ4W84mJos03u-qMqOvCp1S94-Uub7Ts__1iMC7sbQxwzKicwQ0AdbvOEBUccBaVqIW5b-Pku6U3FJo5pJ3r1ZkmUlXK69ugXfgUMT4dinnamUMqRtIVe9EczMnuwCQqUzXBLdlzY5NsadxPXDEWsH7nmpVLfIuFi7HuUACettKV6cYzgzYtshNjLuYHZgZNb81n0Y78ozS4yYyvkKCt0afruNQ8FSr_PY9TYpCv8Zq_w='
+session_string = ''
 
 # Channel IDs that users must join with markdown formatting
 REQUIRED_CHANNELS = [
