@@ -1,4 +1,4 @@
-module github.com/workspace/bot
+module github.com/cntox/GoBot
 
 go 1.25.0
 
