@@ -5,7 +5,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/workspace/bot/config"
+	"github.com/cntox/GoBot/config"
 	_ "github.com/mattn/go-sqlite3"
 )
 
