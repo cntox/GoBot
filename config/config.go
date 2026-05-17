@@ -1,16 +1,29 @@
+// config/config.go
+
 package config
 
-// Replace with your actual values
-const (
-	APIId   = 12380656
-	APIHash = "d927c13beaaf5110f25c505b7c071273"
-	DBName  = "poll_bot.db"
+import (
+	"log"
+	"os"
+
+	"github.com/joho/godotenv"
 )
 
-// ADMIN_IDS — add your Telegram user IDs here
-var AdminIDs = []int64{6644859358, 8451305181, 7183060880}
+var (
+	APIId         int32
+	APIHash       string
+	SessionString string
+	DBName        string
+)
 
-// REQUIRED_CHANNELS — channels users must join
+// ADMIN IDS
+var AdminIDs = []int64{
+	6644859358,
+	8451305181,
+	7183060880,
+}
+
+// REQUIRED CHANNELS
 var RequiredChannels = []string{
 	"@exampurrs",
 	"@exampurss_official",
@@ -18,7 +31,7 @@ var RequiredChannels = []string{
 	"@FONT_CHANNEL_01",
 }
 
-// ChannelDisplay — markdown display names for channels
+// CHANNEL DISPLAY
 var ChannelDisplay = map[string]string{
 	"@exampurrs":          "[ᴇxᴀᴍᴘᴜʀ](https://t.me/exampurrs)",
 	"@exampurss_official": "[ᴇxᴀᴍᴘᴜʀ Qᴜɪᴢ](https://t.me/exampurss_official)",
@@ -26,11 +39,33 @@ var ChannelDisplay = map[string]string{
 	"@FONT_CHANNEL_01":    "[ꜱᴛʏʟɪꜱʜ ꜰᴏɴᴛ](https://t.me/FONT_CHANNEL_01)",
 }
 
+// Load Config
+func Load() {
+
+	err := godotenv.Load()
+
+	if err != nil {
+		log.Println(".env file not found, using system env")
+	}
+
+	APIHash = os.Getenv("API_HASH")
+	SessionString = os.Getenv("SESSION_STRING")
+
+	DBName = "quiz.db"
+
+	// API ID
+	APIId = 12380656
+}
+
+// Check Admin
 func IsAdmin(userID int64) bool {
+
 	for _, id := range AdminIDs {
+
 		if id == userID {
 			return true
 		}
 	}
+
 	return false
 }
