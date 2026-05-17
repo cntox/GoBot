@@ -288,7 +288,7 @@ func RegisterHandlers(
 		func(m *telegram.NewMessage) error {
 
 			_, err := m.Reply(
-				"😎 Bad OP\n\nvivan lund ki topi ",
+				"😎 Bad OP 🔥",
 			)
 
 			return err
