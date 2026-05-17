@@ -1,11 +1,8 @@
-module main
+module github.com/workspace/bot
 
 go 1.25.0
 
 require (
-	github.com/amarnathcjd/gogram v1.7.3-0.20260314054505-186e726d4d88
-    github.com/shirou/gopsutil v3
-	github.com/shirou/gopsutil v3
-	github.com/shirou/gopsutil v3
-	github.com/showwin/speedtest-go v1.7.10
+	github.com/amarnathcjd/gogram v1.7.3
+	github.com/mattn/go-sqlite3 v1.14.22
 )
