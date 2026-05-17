@@ -192,7 +192,7 @@ func buildWelcomeMessage() string {
 	msg += "You can now use:\n"
 	msg += "• /ping\n"
 	msg += "• /check\n"
-	msg += "• /pn"
+	msg += "• /bad"
 
 	return msg
 }
@@ -261,7 +261,7 @@ func RegisterHandlers(
 			msg += "Commands:\n"
 			msg += "• /ping\n"
 			msg += "• /check\n"
-			msg += "• /pn"
+			msg += "• /bad"
 
 			_, err := m.Reply(msg)
 
@@ -276,6 +276,19 @@ func RegisterHandlers(
 
 			_, err := m.Reply(
 				"🏓 Pong!\n⚡ Bot Working Successfully.",
+			)
+
+			return err
+		},
+	)
+
+	// BAD
+	client.OnCommand(
+		"bad",
+		func(m *telegram.NewMessage) error {
+
+			_, err := m.Reply(
+				"😎 Bad OP\n\nvivan lund ki topi ",
 			)
 
 			return err
