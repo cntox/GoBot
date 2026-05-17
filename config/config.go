@@ -16,24 +16,36 @@ var (
 	DBName        string
 )
 
+// =======================
 // ADMIN IDS
+// =======================
+
 var AdminIDs = []int64{
 	6644859358,
 	8451305181,
 	7183060880,
 }
 
+// =======================
 // REQUIRED CHANNELS
+// =======================
+
 var RequiredChannels = []string{
-	"jdnekmsms",
+	"@jdnekmsms",
 }
 
+// =======================
 // CHANNEL DISPLAY
+// =======================
+
 var ChannelDisplay = map[string]string{
-	"jdnekmsms",
+	"@jdnekmsms": "📢 Official Channel",
 }
 
-// Load Config
+// =======================
+// LOAD CONFIG
+// =======================
+
 func Load() {
 
 	err := godotenv.Load()
@@ -42,16 +54,23 @@ func Load() {
 		log.Println(".env file not found, using system env")
 	}
 
+	// ENV VALUES
 	APIHash = os.Getenv("API_HASH")
 	SessionString = os.Getenv("SESSION_STRING")
 
+	// DATABASE
 	DBName = "quiz.db"
 
 	// API ID
 	APIId = 12380656
+
+	log.Println("Config loaded successfully")
 }
 
-// Check Admin
+// =======================
+// CHECK ADMIN
+// =======================
+
 func IsAdmin(userID int64) bool {
 
 	for _, id := range AdminIDs {
