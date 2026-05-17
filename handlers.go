@@ -10,8 +10,8 @@ import (
         "time"
 
         "github.com/amarnathcjd/gogram/telegram"
-        "github.com/workspace/bot/config"
-        "github.com/workspace/bot/db"
+        "github.com/cntox/GoBot/config"
+        "github.com/cntox/GoBot/db"
 )
 
 var (
