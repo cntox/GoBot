@@ -1,5 +1,4 @@
-package src
-
+package modules
 
 import (
 	"fmt"
@@ -8,7 +7,9 @@ import (
 	"regexp"
 	"strings"
 	"sync"
-	"time"
+
+	"quiz/config"
+	"quiz/database"
 
 	"github.com/amarnathcjd/gogram/telegram"
 )
