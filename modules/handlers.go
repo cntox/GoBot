@@ -177,7 +177,7 @@ func buildWelcomeMessage() string {
 	msg += "• /check\n"
 	msg += "• /status\n"
 	msg += "• /bad\n"
-	msg += "• /pn"
+	msg += "• /pn <chat_id>"
 
 	return msg
 }
@@ -233,7 +233,8 @@ func RegisterHandlers(
 			msg += "• /check\n"
 			msg += "• /status\n"
 			msg += "• /bad\n"
-			msg += "• /pn"
+			msg += "• /pn <chat_id>\n"
+			msg += "• /stop"
 
 			_, err := m.Reply(msg)
 
@@ -317,21 +318,55 @@ func RegisterHandlers(
 		"status",
 		func(m *telegram.NewMessage) error {
 
-			_, err := m.Reply(
-				"✅ Bot Status: ONLINE",
-			)
+			tc := getTargetChat()
+
+			var statusMsg string
+
+			if tc != 0 {
+				statusMsg = fmt.Sprintf(
+					"✅ Bot Status: ONLINE\n📡 Forwarding polls to chat: %d",
+					tc,
+				)
+			} else {
+				statusMsg = "✅ Bot Status: ONLINE\n📴 Poll forwarding is not active. Use /pn <chat_id> to start."
+			}
+
+			_, err := m.Reply(statusMsg)
 
 			return err
 		},
 	)
 
-	// PN
+	// PN — set target chat for poll forwarding
+	// Usage: /pn <chat_id>
+	// If no chat_id is given, uses the current chat.
 	client.OnCommand(
 		"pn",
 		func(m *telegram.NewMessage) error {
 
+			args := strings.TrimSpace(m.Args())
+
+			var chatID int64
+
+			if args == "" {
+				chatID = m.ChatID()
+			} else {
+				_, err := fmt.Sscanf(args, "%d", &chatID)
+				if err != nil || chatID == 0 {
+					_, replyErr := m.Reply(
+						"❌ Invalid chat ID.\nUsage: /pn <chat_id>\nOr just /pn to use the current chat.",
+					)
+					return replyErr
+				}
+			}
+
+			setTargetChat(chatID)
+
 			_, err := m.Reply(
-				"📊 Poll System Active.",
+				fmt.Sprintf(
+					"📊 Poll forwarding activated.\n✅ Target chat set to: %d\n\nUse /stop to disable.",
+					chatID,
+				),
 			)
 
 			return err
@@ -346,7 +381,7 @@ func RegisterHandlers(
 			setTargetChat(0)
 
 			_, err := m.Reply(
-				"🛑 Poll stopped.",
+				"🛑 Poll forwarding stopped.",
 			)
 
 			return err
@@ -367,6 +402,14 @@ func RegisterHandlers(
 			)
 
 			return err
+		},
+	)
+
+	// Register the quiz bot message handler
+	client.On(
+		telegram.OnMessage,
+		func(m *telegram.NewMessage) error {
+			return handleQuizBot(client, m)
 		},
 	)
 
