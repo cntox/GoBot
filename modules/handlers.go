@@ -3,12 +3,10 @@ package src
 import (
 	"fmt"
 	"log"
-	"math/rand"
 	"regexp"
 	"strings"
 	"sync"
-	"time"
-
+	
 	"quiz/config"
 	"quiz/database"
 
