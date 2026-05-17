@@ -1,14 +1,14 @@
 package src
 
+
 import (
 	"fmt"
 	"log"
+	"math/rand"
 	"regexp"
 	"strings"
 	"sync"
-	
-	"quiz/config"
-	"quiz/database"
+	"time"
 
 	"github.com/amarnathcjd/gogram/telegram"
 )
