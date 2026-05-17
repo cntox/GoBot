@@ -57,9 +57,11 @@ func removeEmojis(text string) string {
 }
 
 func cleanQuestion(text string) string {
+
 	text = removeEmojis(text)
 
 	for {
+
 		loc := numberPrefixRegex.FindStringIndex(text)
 
 		if loc == nil {
@@ -95,7 +97,11 @@ func checkUserJoinedChannels(
 
 	for _, channel := range config.RequiredChannels {
 
-		joined := isUserInChannel(client, userID, channel)
+		joined := isUserInChannel(
+			client,
+			userID,
+			channel,
+		)
 
 		channelsStatus[channel] = joined
 	}
@@ -142,11 +148,13 @@ func isUserInChannel(
 	return true
 }
 
-func buildWarningMessage(channelsStatus map[string]bool) string {
+func buildWarningMessage(
+	channelsStatus map[string]bool,
+) string {
 
-	msg := "**⚠️ Please join all required channels first!**\n\n"
+	msg := "⚠️ Please join all required channels first!\n\n"
 
-	msg += "**Required Channels:**\n"
+	msg += "Required Channels:\n"
 
 	for i, channel := range config.RequiredChannels {
 
@@ -170,29 +178,21 @@ func buildWarningMessage(channelsStatus map[string]bool) string {
 		)
 	}
 
-	msg += "\nAfter joining all channels, send /pn again."
+	msg += "\nAfter joining all channels send /check again."
 
 	return msg
 }
 
 func buildWelcomeMessage() string {
 
-	msg := "🎉 **Welcome! All channels verified successfully!**\n\n"
+	msg := "🎉 Welcome!\n\n"
 
-	msg += "✅ You can now use `/pn` command.\n\n"
+	msg += "✅ All channels verified successfully.\n\n"
 
-	msg += "**Joined Channels:**\n"
-
-	for i, channel := range config.RequiredChannels {
-
-		display := config.ChannelDisplay[channel]
-
-		if display == "" {
-			display = channel
-		}
-
-		msg += fmt.Sprintf("%d. %s\n", i+1, display)
-	}
+	msg += "You can now use:\n"
+	msg += "• /ping\n"
+	msg += "• /check\n"
+	msg += "• /pn"
 
 	return msg
 }
@@ -205,7 +205,9 @@ func sendWarningIfAllowed(
 
 	if database.ShouldSendWarning(userID) {
 
-		m.Reply(buildWarningMessage(channelsStatus))
+		m.Reply(
+			buildWarningMessage(channelsStatus),
+		)
 
 		database.UpdateLastWarning(userID)
 	}
@@ -239,4 +241,93 @@ func maxInt(a, b int) int {
 
 func randomID() int64 {
 	return rand.Int63()
+}
+
+// =======================
+// HANDLERS
+// =======================
+
+func RegisterHandlers(
+	client *telegram.Client,
+) {
+
+	// START
+	client.OnCommand(
+		"start",
+		func(m *telegram.NewMessage) error {
+
+			msg := "🎉 Quiz Bot Started!\n\n"
+
+			msg += "Commands:\n"
+			msg += "• /ping\n"
+			msg += "• /check\n"
+			msg += "• /pn"
+
+			_, err := m.Reply(msg)
+
+			return err
+		},
+	)
+
+	// PING
+	client.OnCommand(
+		"ping",
+		func(m *telegram.NewMessage) error {
+
+			_, err := m.Reply(
+				"🏓 Pong!\n⚡ Bot Working Successfully.",
+			)
+
+			return err
+		},
+	)
+
+	// CHECK
+	client.OnCommand(
+		"check",
+		func(m *telegram.NewMessage) error {
+
+			userID := m.SenderID()
+
+			uInfo := senderUserInfo(m)
+
+			joinedAll, statusChanged, channelsStatus :=
+				checkUserJoinedChannels(
+					client,
+					userID,
+					uInfo,
+				)
+
+			if statusChanged && joinedAll {
+
+				m.Reply(
+					buildWelcomeMessage(),
+				)
+
+				database.UpdateWelcomeSent(
+					userID,
+					true,
+				)
+			}
+
+			if !joinedAll {
+
+				sendWarningIfAllowed(
+					m,
+					userID,
+					channelsStatus,
+				)
+
+				return nil
+			}
+
+			_, err := m.Reply(
+				"✅ All required channels joined.",
+			)
+
+			return err
+		},
+	)
+
+	log.Println("Handlers Loaded Successfully")
 }
