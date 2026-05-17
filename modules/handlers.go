@@ -1,3 +1,5 @@
+// modules/handlers.go
+
 package modules
 
 import (
@@ -7,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"quiz/config"
 	"quiz/database"
@@ -61,7 +64,6 @@ func cleanQuestion(text string) string {
 	text = removeEmojis(text)
 
 	for {
-
 		loc := numberPrefixRegex.FindStringIndex(text)
 
 		if loc == nil {
@@ -86,6 +88,10 @@ func cleanAnswerText(text string) string {
 
 	return strings.TrimSpace(cleaned)
 }
+
+// =======================
+// CHANNEL CHECK
+// =======================
 
 func checkUserJoinedChannels(
 	client *telegram.Client,
@@ -115,46 +121,25 @@ func checkUserJoinedChannels(
 	return hasJoinedAll, statusChanged, channelsStatus
 }
 
+// TEMP TRUE
 func isUserInChannel(
 	client *telegram.Client,
 	userID int64,
 	channel string,
 ) bool {
 
-	_, err := client.GetChatMember(channel, userID)
-
-	if err != nil {
-
-		errStr := err.Error()
-
-		if strings.Contains(errStr, "USER_NOT_PARTICIPANT") ||
-			strings.Contains(errStr, "CHANNEL_PRIVATE") ||
-			strings.Contains(errStr, "not a channel") ||
-			strings.Contains(errStr, "peer is not") {
-
-			return false
-		}
-
-		log.Printf(
-			"Error checking channel %s for user %d: %v",
-			channel,
-			userID,
-			err,
-		)
-
-		return false
-	}
-
 	return true
 }
+
+// =======================
+// MESSAGE BUILDERS
+// =======================
 
 func buildWarningMessage(
 	channelsStatus map[string]bool,
 ) string {
 
 	msg := "⚠️ Please join all required channels first!\n\n"
-
-	msg += "Required Channels:\n"
 
 	for i, channel := range config.RequiredChannels {
 
@@ -178,8 +163,6 @@ func buildWarningMessage(
 		)
 	}
 
-	msg += "\nAfter joining all channels send /check again."
-
 	return msg
 }
 
@@ -189,10 +172,12 @@ func buildWelcomeMessage() string {
 
 	msg += "✅ All channels verified successfully.\n\n"
 
-	msg += "You can now use:\n"
+	msg += "Available Commands:\n"
 	msg += "• /ping\n"
 	msg += "• /check\n"
-	msg += "• /bad"
+	msg += "• /status\n"
+	msg += "• /bad\n"
+	msg += "• /pn"
 
 	return msg
 }
@@ -205,9 +190,7 @@ func sendWarningIfAllowed(
 
 	if database.ShouldSendWarning(userID) {
 
-		m.Reply(
-			buildWarningMessage(channelsStatus),
-		)
+		m.Reply(buildWarningMessage(channelsStatus))
 
 		database.UpdateLastWarning(userID)
 	}
@@ -230,19 +213,6 @@ func senderUserInfo(
 	}
 }
 
-func maxInt(a, b int) int {
-
-	if a > b {
-		return a
-	}
-
-	return b
-}
-
-func randomID() int64 {
-	return rand.Int63()
-}
-
 // =======================
 // HANDLERS
 // =======================
@@ -256,12 +226,14 @@ func RegisterHandlers(
 		"start",
 		func(m *telegram.NewMessage) error {
 
-			msg := "🎉 Quiz Bot Started!\n\n"
+			msg := "🎉 Quiz Bot Started Successfully!\n\n"
 
 			msg += "Commands:\n"
 			msg += "• /ping\n"
 			msg += "• /check\n"
-			msg += "• /bad"
+			msg += "• /status\n"
+			msg += "• /bad\n"
+			msg += "• /pn"
 
 			_, err := m.Reply(msg)
 
@@ -288,7 +260,7 @@ func RegisterHandlers(
 		func(m *telegram.NewMessage) error {
 
 			_, err := m.Reply(
-				"😎 BAD OP 🔥 VIVAN LUND KA TOPI",
+				"😎 Bad OP 🔥",
 			)
 
 			return err
@@ -313,9 +285,7 @@ func RegisterHandlers(
 
 			if statusChanged && joinedAll {
 
-				m.Reply(
-					buildWelcomeMessage(),
-				)
+				m.Reply(buildWelcomeMessage())
 
 				database.UpdateWelcomeSent(
 					userID,
@@ -342,5 +312,123 @@ func RegisterHandlers(
 		},
 	)
 
-	log.Println("Handlers Loaded Successfully")
+	// STATUS
+	client.OnCommand(
+		"status",
+		func(m *telegram.NewMessage) error {
+
+			_, err := m.Reply(
+				"✅ Bot Status: ONLINE",
+			)
+
+			return err
+		},
+	)
+
+	// PN
+	client.OnCommand(
+		"pn",
+		func(m *telegram.NewMessage) error {
+
+			_, err := m.Reply(
+				"📊 Poll System Active.",
+			)
+
+			return err
+		},
+	)
+
+	// STOP
+	client.OnCommand(
+		"stop",
+		func(m *telegram.NewMessage) error {
+
+			setTargetChat(0)
+
+			_, err := m.Reply(
+				"🛑 Poll stopped.",
+			)
+
+			return err
+		},
+	)
+
+	// REFRESH
+	client.OnCommand(
+		"refresh",
+		func(m *telegram.NewMessage) error {
+
+			userID := m.SenderID()
+
+			database.RemoveUser(userID)
+
+			_, err := m.Reply(
+				"🔄 Refreshed Successfully.",
+			)
+
+			return err
+		},
+	)
+
+	log.Println("✅ Handlers Loaded Successfully")
+}
+
+// =======================
+// QUIZ BOT HANDLER
+// =======================
+
+func handleQuizBot(
+	client *telegram.Client,
+	m *telegram.NewMessage,
+) error {
+
+	tc := getTargetChat()
+
+	if tc == 0 {
+		return nil
+	}
+
+	msg := m.Message
+
+	if msg.Media == nil {
+		return nil
+	}
+
+	mediaPoll, ok := msg.Media.(*telegram.MessageMediaPoll)
+
+	if !ok {
+		return nil
+	}
+
+	poll := mediaPoll.Poll
+
+	if len(poll.Answers) == 0 {
+		return nil
+	}
+
+	randomAns, ok := poll.Answers[rand.Intn(len(poll.Answers))].(*telegram.PollAnswerObj)
+
+	if !ok {
+		return nil
+	}
+
+	quizBotPeer, err := client.ResolvePeer("QuizBot")
+
+	if err != nil {
+		return nil
+	}
+
+	_, err = client.MessagesSendVote(
+		quizBotPeer,
+		msg.ID,
+		[][]byte{randomAns.Option},
+	)
+
+	if err != nil {
+		return nil
+	}
+
+	time.Sleep(2 * time.Second)
+
+	return nil
 }
