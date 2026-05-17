@@ -13,7 +13,7 @@ import (
 	"strings"
 
 	"github.com/amarnathcjd/gogram/telegram"
-	"github.com/workspace/bot/config"
+	"github.com/cntox/GoBot/config"
 )
 
 func main() {
