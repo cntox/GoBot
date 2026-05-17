@@ -6,6 +6,7 @@ import (
 	"log/slog"
 
 	"quiz/config"
+	"quiz/modules"
 
 	"github.com/amarnathcjd/gogram/telegram"
 )
@@ -40,21 +41,13 @@ func InitBot() error {
 	return nil
 }
 
-// RegisterHandlers registers all handlers
+// RegisterHandlers
 func RegisterHandlers() {
 
-	// Example Command
-	Bot.On("message:/start", func(m *telegram.NewMessage) error {
-
-		_, err := m.Reply(
-			"🎉 Quiz Bot Started Successfully!",
-		)
-
-		return err
-	})
+	modules.RegisterHandlers(Bot)
 }
 
-// Run keeps bot alive
+// Run
 func Run() {
 	Bot.Idle()
 }
