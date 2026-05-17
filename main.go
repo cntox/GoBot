@@ -1,54 +1,46 @@
 package main
 
 import (
-	"log"
+	"log/slog"
 	"os"
-	"strings"
 
-	"github.com/amarnathcjd/gogram/telegram"
-	"github.com/workspace/bot/bot"
-	"github.com/workspace/bot/config"
-	"github.com/workspace/bot/db"
+	"quiz/client"
+	"quiz/config"
+	"quiz/database"
+
+	_ "quiz/modules"
 )
 
 func main() {
-	// Read session string from env or file
-	sessionString := strings.TrimSpace(os.Getenv("SESSION_STRING"))
-	if sessionString == "" {
-		data, err := os.ReadFile("session.txt")
-		if err == nil {
-			sessionString = strings.TrimSpace(string(data))
-		}
-	}
-	if sessionString == "" {
-		log.Fatal("SESSION_STRING not set. Run: go run generate_session/main.go")
-	}
 
-	// Initialize database
-	db.Init()
-	db.UpdateBotStats()
+	// Logger
+	logger := slog.New(
+		slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+			Level: slog.LevelInfo,
+		}),
+	)
 
-	// Create Telegram client with string session
-	client, err := telegram.NewClient(telegram.ClientConfig{
-		AppID:         config.APIId,
-		AppHash:       config.APIHash,
-		StringSession: sessionString,
-		LogLevel:      telegram.LogInfo,
-	})
-	if err != nil {
-		log.Fatalf("Failed to create client: %v", err)
+	slog.SetDefault(logger)
+
+	slog.Info("🚀 Quiz Bot Starting...", "version", "v1.0.0")
+
+	// Load Config
+	config.Load()
+
+	// Database Init
+	database.Init()
+
+	// Start Bot
+	if err := client.InitBot(); err != nil {
+		slog.Error("Failed to start bot", "error", err)
+		os.Exit(1)
 	}
 
-	// Connect + authorize via Start()
-	if err := client.Start(); err != nil {
-		log.Fatalf("Failed to start client: %v", err)
-	}
+	// Register Handlers
+	client.RegisterHandlers()
 
-	log.Println("Bot started successfully!")
+	slog.Info("✅ Quiz Bot Running!")
 
-	// Register all handlers
-	bot.RegisterHandlers(client)
-
-	// Block until terminated
-	client.Idle()
+	// Run Forever
+	client.Run()
 }
