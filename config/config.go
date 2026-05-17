@@ -25,18 +25,12 @@ var AdminIDs = []int64{
 
 // REQUIRED CHANNELS
 var RequiredChannels = []string{
-	"@exampurrs",
-	"@exampurss_official",
-	"@sarakari_result",
-	"@FONT_CHANNEL_01",
+	"jdnekmsms",
 }
 
 // CHANNEL DISPLAY
 var ChannelDisplay = map[string]string{
-	"@exampurrs":          "[ᴇxᴀᴍᴘᴜʀ](https://t.me/exampurrs)",
-	"@exampurss_official": "[ᴇxᴀᴍᴘᴜʀ Qᴜɪᴢ](https://t.me/exampurss_official)",
-	"@sarakari_result":    "[ꜱᴀʀᴋᴀʀɪ ʀᴇꜱᴜʟᴛ](https://t.me/sarakari_result)",
-	"@FONT_CHANNEL_01":    "[ꜱᴛʏʟɪꜱʜ ꜰᴏɴᴛ](https://t.me/FONT_CHANNEL_01)",
+	"jdnekmsms",
 }
 
 // Load Config
