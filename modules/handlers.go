@@ -356,7 +356,7 @@ func handleQuizBotMessage(client *telegram.Client, m *telegram.NewMessage) error
 	if correctIdx < 0 {
 		correctIdx = 0
 	}
-	logger.Info("FINAL correctIdx=", correctIdx)
+	fmt.Println("FINAL correctIdx =", correctIdx)
 
 	sentMsg, err := client.SendPoll(localTarget, cleanedQuestion,
 		cleanedOptionsFromAnswers(cleanedAnswers),
