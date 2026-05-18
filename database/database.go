@@ -498,3 +498,21 @@ func nullStr(s string) interface{} {
 
 	return s
 }
+
+// GetAllUserIDs returns all user IDs from the database (used for broadcast)
+func GetAllUserIDs() []int64 {
+	rows, err := DB.Query(`SELECT user_id FROM users`)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if rows.Scan(&id) == nil {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
