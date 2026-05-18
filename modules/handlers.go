@@ -122,7 +122,7 @@ func isUserInChannel(client *telegram.Client, userID int64, channel string) bool
 }
 
 func buildWarningMessage(channelsStatus map[string]bool) string {
-	msg := "**⚠️ 𝐏𝐡𝐥𝐞 𝐬𝐚𝐫𝐞 𝐠𝐫𝐨𝐮𝐩 𝐨𝐫 𝐜𝐡𝐚𝐧𝐧𝐞𝐥 𝐣𝐨𝐢𝐧 𝐤𝐫 𝐧𝐡𝐢 𝐦 𝐧𝐡𝐢 𝐛𝐧𝐚 𝐫𝐡𝐚 𝐭𝐮𝐦𝐡𝐚𝐫𝐞 𝐤𝐨𝐢 𝐩𝐨𝐥𝐥𝐬 🙂😏!**\n\n"
+	msg := "**⚠️ 🙂😏!**\n\n"
 	msg += "**Please join these channels:**\n"
 	for i, channel := range config.RequiredChannels {
 		status := "✅ Joined"
