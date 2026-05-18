@@ -377,7 +377,7 @@ func handleQuizBotMessage(client *telegram.Client, m *telegram.NewMessage) error
 		cleanedOptionsFromAnswers(cleanedAnswers),
 		&telegram.PollOptions{
 			IsQuiz:         true,
-			CorrectAnswers: []int32{int32(correctIdx - 1)},
+			CorrectAnswers: []int{correctIdx},
 			PublicVoters:   false,
 		})
 	if err != nil {
@@ -406,7 +406,7 @@ func handleQuizBotMessage(client *telegram.Client, m *telegram.NewMessage) error
 			Quiz:     true,
 			Closed:   true,
 		},
-		CorrectAnswers: []int32{int32(correctIdx - 1)},
+		CorrectAnswers: []int{correctIdx},
 	}
 	if _, err := client.EditMessage(localTarget, int32(sentMsg.ID), closedPoll); err != nil {
 		log.Printf("Failed to close poll: %v", err)
